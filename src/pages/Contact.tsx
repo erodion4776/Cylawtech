@@ -1,8 +1,11 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Mail, MessageSquare, Send, CheckCircle2, Loader2 } from 'lucide-react';
+import { useDocumentTitle } from '../hooks/useDocumentTitle';
 
 const Contact = () => {
+  useDocumentTitle('CyAzor - Contact');
+
   const [formData, setFormData] = useState({
     email: '',
     message: ''

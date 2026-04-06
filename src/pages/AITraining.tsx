@@ -3,6 +3,7 @@ import { motion } from 'motion/react';
 import { ExternalLink, PlayCircle, Calculator, Bookmark, BookmarkCheck } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useBookmarks } from '../hooks/useBookmarks';
+import { useDocumentTitle } from '../hooks/useDocumentTitle';
 
 const IncomeCalculator = () => {
   const [hours, setHours] = React.useState(4);
@@ -89,6 +90,7 @@ const IncomeCalculator = () => {
 };
 
 const AITraining = () => {
+  useDocumentTitle('CyAzor - AI Training');
   const { toggleBookmark, isBookmarked } = useBookmarks();
 
   const platforms = [

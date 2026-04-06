@@ -2,8 +2,11 @@ import React from 'react';
 import { motion } from 'motion/react';
 import { BookOpen, Briefcase, Cpu, Heart, ArrowRight, PlayCircle } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { useDocumentTitle } from '../hooks/useDocumentTitle';
 
 const BarBeyond = () => {
+  useDocumentTitle('CyAzor - Bar & Beyond');
+
   const pillars = [
     {
       title: "Bar Prep",

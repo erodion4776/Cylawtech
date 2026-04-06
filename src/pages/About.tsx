@@ -1,8 +1,11 @@
 import React from 'react';
 import { motion } from 'motion/react';
 import { Users, Target, Lightbulb, ShieldCheck } from 'lucide-react';
+import { useDocumentTitle } from '../hooks/useDocumentTitle';
 
 const About = () => {
+  useDocumentTitle('CyAzor - About');
+
   const values = [
     {
       title: "Innovation",

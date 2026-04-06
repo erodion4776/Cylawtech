@@ -1,8 +1,11 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { Bell, CheckCircle2, Search, Book, ShieldCheck } from 'lucide-react';
+import { useDocumentTitle } from '../hooks/useDocumentTitle';
 
 const NaijaLaws = () => {
+  useDocumentTitle('CyAzor - Naija Laws');
+
   const [email, setEmail] = useState('');
   const [submitted, setSubmitted] = useState(false);
 

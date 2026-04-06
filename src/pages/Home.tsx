@@ -4,6 +4,7 @@ import { ArrowRight, Brain, Scale, Globe, Zap, TrendingUp, Shield, PlayCircle, D
 import { Link } from 'react-router-dom';
 import { cn } from '../lib/utils';
 import { useBookmarks } from '../hooks/useBookmarks';
+import { useDocumentTitle } from '../hooks/useDocumentTitle';
 
 const BackgroundMotion = () => (
   <div className="fixed inset-0 -z-10 overflow-hidden pointer-events-none">
@@ -226,6 +227,8 @@ const MicroLearning = () => {
 };
 
 const Home = () => {
+  useDocumentTitle('CyAzor LawTech Solutions - Law • Technology • Digital Growth');
+
   const containerVariants = {
     hidden: { opacity: 0 },
     visible: {
