@@ -12,6 +12,8 @@ import Opportunities from './pages/Opportunities';
 import About from './pages/About';
 import Contact from './pages/Contact';
 import Legal from './pages/Legal';
+import LexAI from './pages/LexAI';
+import AdminDashboard from './pages/AdminDashboard';
 import PageTransition from './components/PageTransition';
 import ScrollProgress from './components/ScrollProgress';
 
@@ -37,6 +39,8 @@ const AnimatedRoutes = () => {
           <Route path="/opportunities" element={<PageTransition><Opportunities /></PageTransition>} />
           <Route path="/about" element={<PageTransition><About /></PageTransition>} />
           <Route path="/contact" element={<PageTransition><Contact /></PageTransition>} />
+          <Route path="/lex-ai" element={<PageTransition><LexAI /></PageTransition>} />
+          <Route path="/admin" element={<PageTransition><AdminDashboard /></PageTransition>} />
           <Route path="/:type" element={<PageTransition><Legal /></PageTransition>} />
         </Routes>
       </motion.div>
