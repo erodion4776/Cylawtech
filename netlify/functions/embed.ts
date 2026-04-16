@@ -14,7 +14,10 @@ async function getEmbedding(text: string) {
   try {
     const result = await ai.models.embedContent({
       model: "gemini-embedding-2-preview",
-      contents: text
+      contents: text,
+      config: {
+        outputDimensionality: 768
+      }
     });
     if (result.embeddings && result.embeddings.length > 0) {
       return result.embeddings[0].values;
