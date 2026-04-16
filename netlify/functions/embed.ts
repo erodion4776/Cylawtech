@@ -25,21 +25,27 @@ export const handler: Handler = async (event) => {
     return { statusCode: 405, body: 'Method Not Allowed' };
   }
 
+  let currentStep = "Initializing";
   try {
+    currentStep = "Parsing JSON Body";
     const { fileBase64, filename, jurisdiction, difficulty, productTag } = JSON.parse(event.body || '{}');
 
     if (!fileBase64) {
       return { statusCode: 400, body: JSON.stringify({ error: "No file provided" }) };
     }
 
+    currentStep = "Decoding Base64 to Buffer";
     const buffer = Buffer.from(fileBase64, 'base64');
     
-    // Parse PDF
+    currentStep = "Parsing PDF with pdf-parse";
     const data = await pdf(buffer);
     const text = data.text;
 
+    currentStep = "Chunking parsed text";
     // Simple chunking (by paragraph)
     const chunks = text.split('\n\n').filter((p: string) => p.trim().length > 100);
+
+    currentStep = "Processing chunks in batches";
 
     // Process chunks in batches to avoid OOM socket exhaustion
     let processedCount = 0;
@@ -87,10 +93,15 @@ export const handler: Handler = async (event) => {
       })
     };
   } catch (error: any) {
-    console.error("Embedding API Error:", error);
+    console.error(`Embedding API Error at step [${currentStep}]:`, error);
     return {
       statusCode: 500,
-      body: JSON.stringify({ error: `Failed to process document: ${error.message || 'Unknown error'}` })
+      body: JSON.stringify({ 
+        error: `Failed to process document.`,
+        step: currentStep,
+        details: error.message || String(error),
+        stack: error.stack
+      })
     };
   }
 };

@@ -8,6 +8,7 @@ const AdminDashboard = () => {
   const [activeTab, setActiveTab] = useState('resources');
   const [isProcessing, setIsProcessing] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<string | null>(null);
+  const [debugLogs, setDebugLogs] = useState<{time: string, msg: string}[]>([]);
   const [adminData, setAdminData] = useState({
     jurisdiction: 'nigeria',
     difficulty: 'beginner',
@@ -23,48 +24,88 @@ const AdminDashboard = () => {
 
     setIsProcessing(true);
     setUploadStatus(null);
+    setDebugLogs([]);
+
+    const addLog = (msg: string) => {
+      console.log(`[DEBUG] ${msg}`);
+      setDebugLogs(prev => [...prev, { time: new Date().toISOString().split('T')[1].split('.')[0], msg }]);
+    };
 
     try {
+      addLog(`File selected: ${adminData.file.name} (${(adminData.file.size / 1024 / 1024).toFixed(2)} MB)`);
       const reader = new FileReader();
-      reader.readAsDataURL(adminData.file);
+      
       reader.onload = async () => {
-        const base64 = (reader.result as string).split(',')[1];
-        
-        const payload = {
-          fileBase64: base64,
-          filename: adminData.file?.name,
-          jurisdiction: adminData.jurisdiction,
-          difficulty: adminData.difficulty,
-          productTag: adminData.productTag
-        };
+        addLog("FileReader loaded file into memory.");
+        try {
+          const base64 = (reader.result as string).split(',')[1];
+          
+          const payload = {
+            fileBase64: base64,
+            filename: adminData.file?.name,
+            jurisdiction: adminData.jurisdiction,
+            difficulty: adminData.difficulty,
+            productTag: adminData.productTag
+          };
 
-        const response = await fetch('/.netlify/functions/embed', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
+          const payloadString = JSON.stringify(payload);
+          const payloadSizeMb = (new Blob([payloadString]).size / (1024 * 1024)).toFixed(2);
+          addLog(`Prepared payload. Estimated request size: ${payloadSizeMb} MB`);
 
-        let result;
-        const contentType = response.headers.get("content-type");
-        if (contentType && contentType.includes("application/json")) {
-          result = await response.json();
-        } else {
-          result = { error: `Server error: ${response.status} ${response.statusText}` };
+          if (parseFloat(payloadSizeMb) > 5.5) {
+             addLog(`WARNING: Payload is very large (${payloadSizeMb} MB). Netlify AWS Lambda limit is typically 6MB. This might cause a 502/413 Proxy error!`);
+          }
+
+          addLog(`Sending POST request to /.netlify/functions/embed...`);
+          const response = await fetch('/.netlify/functions/embed', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: payloadString,
+          });
+
+          addLog(`Received response: HTTP ${response.status} ${response.statusText}`);
+
+          const rawText = await response.text();
+          addLog(`Raw response text snippet (first 100 chars): ${rawText.substring(0, 100).replace(/\n/g, ' ')}...`);
+
+          let result;
+          try {
+            result = JSON.parse(rawText);
+            addLog(`Successfully parsed response as JSON.`);
+            if (result.step) addLog(`Backend failed at step: ${result.step}`);
+            if (result.details) addLog(`Backend error details: ${result.details}`);
+            if (result.stack) addLog(`Backend stacktrace included.`);
+          } catch (e) {
+            addLog(`Failed to parse response as JSON. This is usually a Gateway Timeout or Server Crash.`);
+            result = { error: `Server error: ${response.status} ${response.statusText}`, raw: rawText };
+          }
+
+          if (response.ok) {
+            setUploadStatus(`Success: ${result?.message}`);
+            addLog(`Process completed successfully.`);
+            setAdminData({ ...adminData, file: null });
+          } else {
+            setUploadStatus(`Error: ${result?.error || result?.details || response.statusText || 'Unknown error.'}`);
+          }
+        } catch (innerError: any) {
+           addLog(`Internal frontend processing error: ${innerError.message}`);
+           setUploadStatus("Error: Internal processing error. Check debug panel.");
+        } finally {
+          setIsProcessing(false);
         }
-
-        if (response.ok) {
-          setUploadStatus(`Success: ${result?.message}`);
-          setAdminData({ ...adminData, file: null });
-        } else {
-          setUploadStatus(`Error: ${result?.error || result?.errorMessage || response.statusText || 'Unknown error. Check Netlify Functions logs.'}`);
-        }
-        setIsProcessing(false);
       };
+
       reader.onerror = () => {
+        addLog("FileReader failed to read the local file.");
         setUploadStatus("Error: Failed to read file locally.");
         setIsProcessing(false);
       };
-    } catch (error) {
+
+      addLog("Starting FileReader readAsDataURL...");
+      reader.readAsDataURL(adminData.file);
+
+    } catch (error: any) {
+      addLog(`Global catch: Failed to connect or start reading: ${error.message}`);
       setUploadStatus("Error: Failed to connect to server.");
       setIsProcessing(false);
     }
@@ -226,6 +267,23 @@ const AdminDashboard = () => {
                       'Process & Embed'
                     )}
                   </button>
+
+                  {/* Debug Panel */}
+                  {debugLogs.length > 0 && (
+                    <div className="mt-6 bg-black rounded-xl p-4 border border-slate-700 font-mono text-xs text-green-400 overflow-y-auto max-h-64">
+                      <div className="flex items-center gap-2 mb-2 text-slate-400 border-b border-slate-800 pb-2">
+                        <Settings size={14} /> <span>Diagnostic Trace Logs</span>
+                      </div>
+                      <ul className="space-y-1">
+                        {debugLogs.map((log, i) => (
+                          <li key={i} className="break-words">
+                            <span className="text-slate-500">[{log.time}]</span> {log.msg}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
                 </div>
 
                 <div className="bg-slate-900/50 rounded-2xl p-6 border border-slate-700">
