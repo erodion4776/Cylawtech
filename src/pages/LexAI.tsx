@@ -36,7 +36,7 @@ const LexAI = () => {
 
   useEffect(() => {
     scrollToBottom();
-  }, [chatHistory]);
+  }, [chatHistory, isChatting]);
 
   const handleChat = async () => {
     if (!chatMessage) return;
@@ -211,6 +211,19 @@ const LexAI = () => {
                 )}
               </div>
             ))}
+
+            {isChatting && (
+              <div className="flex flex-col items-start">
+                <div className="p-4 rounded-2xl bg-white border border-slate-100 shadow-sm max-w-[90%] flex items-center gap-3">
+                  <div className="flex gap-1">
+                    <span className="w-1.5 h-1.5 bg-slate-300 rounded-full animate-bounce [animation-delay:-0.3s]"></span>
+                    <span className="w-1.5 h-1.5 bg-slate-300 rounded-full animate-bounce [animation-delay:-0.15s]"></span>
+                    <span className="w-1.5 h-1.5 bg-slate-300 rounded-full animate-bounce"></span>
+                  </div>
+                  <span className="text-xs font-medium text-slate-400">LexAI is thinking...</span>
+                </div>
+              </div>
+            )}
             <div ref={chatEndRef} />
           </div>
 

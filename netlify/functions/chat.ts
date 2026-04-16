@@ -110,6 +110,7 @@ export const handler: Handler = async (event) => {
           model: "mixtral-8x7b-32768",
         });
         responseText = completion.choices[0]?.message?.content || "";
+        if (!responseText) throw new Error("GROQ returned empty response");
       } else {
         throw new Error("GROQ_API_KEY not set");
       }
@@ -121,6 +122,7 @@ export const handler: Handler = async (event) => {
           contents: systemPrompt + "\n\nUser: " + message,
         });
         responseText = geminiRes.text || "";
+        if (!responseText) throw new Error("Gemini returned empty response");
       } catch (geminiError: any) {
         console.error("Gemini failed:", geminiError);
         try {
@@ -130,6 +132,7 @@ export const handler: Handler = async (event) => {
               inputs: systemPrompt + "\n\nUser: " + message,
             });
             responseText = hfResponse.generated_text || "";
+            if (!responseText) throw new Error("HF returned empty response");
           } else {
              throw new Error("HF_TOKEN not set");
           }
