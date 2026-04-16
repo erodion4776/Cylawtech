@@ -9,8 +9,7 @@ if (typeof global.DOMMatrix === 'undefined') {
 }
 
 // @ts-ignore
-const pdfParse = require("pdf-parse");
-const pdf = pdfParse.default || pdfParse;
+const { PDFParse } = require("pdf-parse");
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || 'dummy' });
 const supabaseUrl = process.env.SUPABASE_URL || 'https://dummy.supabase.co';
@@ -45,8 +44,11 @@ export const handler: Handler = async (event) => {
     currentStep = "Decoding Base64 to Buffer";
     const buffer = Buffer.from(fileBase64, 'base64');
     
-    currentStep = "Parsing PDF with pdf-parse";
-    const data = await pdf(buffer);
+    currentStep = "Initializing PDFParse class";
+    const parser = new PDFParse({ data: buffer });
+    
+    currentStep = "Parsing PDF text";
+    const data = await parser.getText();
     const text = data.text;
 
     currentStep = "Chunking parsed text";
