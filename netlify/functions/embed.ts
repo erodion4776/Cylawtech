@@ -9,7 +9,8 @@ if (typeof global.DOMMatrix === 'undefined') {
 }
 
 // @ts-ignore
-const pdf = require("pdf-parse");
+const pdfParse = require("pdf-parse");
+const pdf = pdfParse.default || pdfParse;
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || 'dummy' });
 const supabaseUrl = process.env.SUPABASE_URL || 'https://dummy.supabase.co';
