@@ -13,7 +13,7 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 async function getEmbedding(text: string) {
   try {
     const result = await ai.models.embedContent({
-      model: "text-embedding-004",
+      model: "gemini-embedding-2-preview",
       contents: text
     });
     if (result.embeddings && result.embeddings.length > 0) {

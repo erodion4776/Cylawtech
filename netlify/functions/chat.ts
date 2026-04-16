@@ -16,9 +16,14 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 
 async function getEmbedding(text: string) {
   try {
-    const model = (ai as any).getGenerativeModel({ model: "text-embedding-004"});
-    const result = await model.embedContent(text);
-    return result.embedding.values;
+    const result = await ai.models.embedContent({
+      model: "gemini-embedding-2-preview",
+      contents: text
+    });
+    if (result.embeddings && result.embeddings.length > 0) {
+      return result.embeddings[0].values;
+    }
+    return null;
   } catch (error) {
     console.error("Embedding generation error:", error);
     return null;
@@ -88,7 +93,7 @@ export const handler: Handler = async (event) => {
     } catch (groqError) {
       try {
         const geminiResponse = await ai.models.generateContent({
-          model: 'gemini-2.5-pro',
+          model: 'gemini-3.1-pro-preview',
           contents: systemPrompt + "\n\nUser: " + message,
         });
         responseText = geminiResponse.text || "";
