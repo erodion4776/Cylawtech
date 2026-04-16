@@ -24,28 +24,41 @@ const AdminDashboard = () => {
     setIsProcessing(true);
     setUploadStatus(null);
 
-    const formData = new FormData();
-    formData.append('file', adminData.file);
-    formData.append('jurisdiction', adminData.jurisdiction);
-    formData.append('difficulty', adminData.difficulty);
-    formData.append('productTag', adminData.productTag);
-
     try {
-      const response = await fetch('/api/admin/embed', {
-        method: 'POST',
-        body: formData,
-      });
+      const reader = new FileReader();
+      reader.readAsDataURL(adminData.file);
+      reader.onload = async () => {
+        const base64 = (reader.result as string).split(',')[1];
+        
+        const payload = {
+          fileBase64: base64,
+          filename: adminData.file?.name,
+          jurisdiction: adminData.jurisdiction,
+          difficulty: adminData.difficulty,
+          productTag: adminData.productTag
+        };
 
-      const result = await response.json();
-      if (response.ok) {
-        setUploadStatus(`Success: ${result.message}`);
-        setAdminData({ ...adminData, file: null });
-      } else {
-        setUploadStatus(`Error: ${result.error}`);
-      }
+        const response = await fetch('/.netlify/functions/embed', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+
+        const result = await response.json();
+        if (response.ok) {
+          setUploadStatus(`Success: ${result.message}`);
+          setAdminData({ ...adminData, file: null });
+        } else {
+          setUploadStatus(`Error: ${result.error}`);
+        }
+        setIsProcessing(false);
+      };
+      reader.onerror = () => {
+        setUploadStatus("Error: Failed to read file locally.");
+        setIsProcessing(false);
+      };
     } catch (error) {
       setUploadStatus("Error: Failed to connect to server.");
-    } finally {
       setIsProcessing(false);
     }
   };

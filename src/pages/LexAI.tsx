@@ -46,7 +46,7 @@ const LexAI = () => {
     setIsChatting(true);
     
     try {
-      const res = await fetch('/api/lexai/chat', {
+      const res = await fetch('/.netlify/functions/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
