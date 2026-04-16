@@ -20,9 +20,9 @@ async function getEmbedding(text: string) {
       return result.embeddings[0].values;
     }
     return null;
-  } catch (error) {
+  } catch (error: any) {
     console.error("Embedding generation error:", error);
-    return null;
+    throw error;
   }
 }
 
@@ -32,6 +32,7 @@ export const handler: Handler = async (event) => {
   }
 
   let currentStep = "Initializing";
+  let lastEmbedError = "";
   try {
     currentStep = "Parsing JSON Body";
     const { fileBase64, filename, jurisdiction, difficulty, productTag } = JSON.parse(event.body || '{}');
@@ -51,25 +52,23 @@ export const handler: Handler = async (event) => {
     // Simple chunking (by paragraph)
     const chunks = text.split('\n\n').filter((p: string) => p.trim().length > 100);
 
-    currentStep = "Processing chunks in batches";
+    currentStep = "Processing chunks sequentially";
 
-    // Process chunks in batches to avoid OOM socket exhaustion
+    // Process chunks sequentially to avoid Gemini API 429 rate limit bursts
     let processedCount = 0;
     let embedErrorCount = 0;
     let dbErrorCount = 0;
-    const batchSize = 10;
     const startTime = Date.now();
 
-    for (let i = 0; i < chunks.length; i += batchSize) {
-      // Check if we approach the 10s Netlify timeout (stop at 7.5 seconds to be safe)
-      if (Date.now() - startTime > 7500) {
+    for (let i = 0; i < chunks.length; i++) {
+      // Check if we approach the 10s Netlify timeout (stop at 8.0 seconds to be safe)
+      if (Date.now() - startTime > 8000) {
         console.warn('Approaching Netlify timeout limit. Stopping early.');
         break;
       }
 
-      const batch = chunks.slice(i, i + batchSize);
-      
-      const uploadPromises = batch.map(async (chunk: string) => {
+      const chunk = chunks[i];
+      try {
         const embedding = await getEmbedding(chunk);
         if (embedding) {
           const { error } = await supabase.from('documents').insert({
@@ -91,16 +90,36 @@ export const handler: Handler = async (event) => {
         } else {
           embedErrorCount++;
         }
-      });
+      } catch (e: any) {
+        embedErrorCount++;
+        lastEmbedError = e.message || String(e);
+      }
+    }
 
-      await Promise.all(uploadPromises);
+    let finalMessage = `Processed ${processedCount} of ${chunks.length} chunks from ${filename}${processedCount < chunks.length ? ' (Truncated due to time limit)' : ''}. Errors - Embed: ${embedErrorCount}, DB: ${dbErrorCount}`;
+    
+    if (embedErrorCount > 0 && lastEmbedError) {
+       finalMessage += ` | Embed Error Details: ${lastEmbedError}`;
+    }
+
+    // If zero chunks succeeded but we had chunks, return an error status so the frontend shows it as a failure
+    if (processedCount === 0 && chunks.length > 0) {
+      return {
+        statusCode: 500,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          error: finalMessage,
+          details: lastEmbedError
+        })
+      };
     }
 
     return {
       statusCode: 200,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ 
-        message: `Successfully processed ${processedCount} of ${chunks.length} chunks from ${filename}${processedCount < chunks.length ? ' (Truncated to fit platform time limit)' : ''}. Errors - Embed: ${embedErrorCount}, DB: ${dbErrorCount}` 
+        message: finalMessage,
+        embedErrorDetails: lastEmbedError
       })
     };
   } catch (error: any) {
