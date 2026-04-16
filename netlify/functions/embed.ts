@@ -1,6 +1,13 @@
 import { Handler } from '@netlify/functions';
 import { GoogleGenAI } from "@google/genai";
 import { createClient } from "@supabase/supabase-js";
+import DOMMatrix from 'dommatrix';
+
+// Fix for pdf-parse "DOMMatrix is not defined" error in Node environments
+if (typeof global.DOMMatrix === 'undefined') {
+  (global as any).DOMMatrix = DOMMatrix;
+}
+
 // @ts-ignore
 const pdf = require("pdf-parse");
 
