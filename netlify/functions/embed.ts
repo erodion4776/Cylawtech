@@ -2,7 +2,7 @@ import { Handler } from '@netlify/functions';
 import { GoogleGenAI } from "@google/genai";
 import { createClient } from "@supabase/supabase-js";
 // @ts-ignore
-import pdf from "pdf-parse";
+const pdf = require("pdf-parse");
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || 'dummy' });
 const supabaseUrl = process.env.SUPABASE_URL || 'https://dummy.supabase.co';
