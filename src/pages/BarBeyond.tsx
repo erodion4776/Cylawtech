@@ -1,5 +1,5 @@
 import React from 'react';
-import { motion } from 'motion/react';
+import { motion, Variants } from 'motion/react';
 import { BookOpen, Briefcase, Cpu, Heart, ArrowRight, PlayCircle } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
@@ -38,7 +38,7 @@ const BarBeyond = () => {
     }
   ];
 
-  const containerVariants = {
+  const containerVariants: Variants = {
     hidden: { opacity: 0 },
     visible: {
       opacity: 1,
@@ -48,7 +48,7 @@ const BarBeyond = () => {
     }
   };
 
-  const pillarVariants = {
+  const pillarVariants: Variants = {
     hidden: { opacity: 0, scale: 0.9, y: 20 },
     visible: { 
       opacity: 1, 
@@ -141,12 +141,12 @@ const BarBeyond = () => {
           className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8 mb-20"
         >
           {pillars.map((pillar, index) => (
-            <motion.div
-              key={index}
-              variants={pillarVariants}
-              whileHover={{ y: -10, shadow: "0 20px 25px -5px rgb(0 0 0 / 0.1)" }}
-              className="rounded-3xl bg-white border border-slate-100 shadow-sm transition-all flex flex-col items-center text-center overflow-hidden group"
-            >
+              <motion.div
+                key={index}
+                variants={pillarVariants}
+                whileHover={{ y: -10 }}
+                className="rounded-3xl bg-white border border-slate-100 shadow-sm transition-all flex flex-col items-center text-center overflow-hidden group"
+              >
               <div className="w-full h-32 overflow-hidden relative">
                 <img 
                   src={pillar.img} 
@@ -172,13 +172,13 @@ const BarBeyond = () => {
         </motion.div>
 
         {/* Future Funnel Box */}
-        <motion.div
-          initial={{ opacity: 0, y: 40 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-          transition={{ duration: 0.8, ease: [0.4, 0, 0.2, 1] }}
-          className="bg-slate-900 rounded-[2.5rem] p-10 md:p-16 text-white overflow-hidden relative shadow-2xl"
-        >
+          <motion.div
+            initial={{ opacity: 0, y: 40 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.8, ease: "easeOut" }}
+            className="bg-slate-900 rounded-[2.5rem] p-10 md:p-16 text-white overflow-hidden relative shadow-2xl"
+          >
           <div className="relative z-10 grid grid-cols-1 md:grid-cols-2 gap-12 items-center">
             <div>
               <h2 className="text-3xl md:text-4xl font-bold mb-6">Future Career Funnel दिशा (Direction)</h2>

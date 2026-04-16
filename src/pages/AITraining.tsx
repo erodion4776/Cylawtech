@@ -1,5 +1,5 @@
 import React from 'react';
-import { motion } from 'motion/react';
+import { motion, Variants } from 'motion/react';
 import { ExternalLink, PlayCircle, Calculator, Bookmark, BookmarkCheck } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useBookmarks } from '../hooks/useBookmarks';
@@ -128,7 +128,7 @@ const AITraining = () => {
     }
   ];
 
-  const containerVariants = {
+  const containerVariants: Variants = {
     hidden: { opacity: 0 },
     visible: {
       opacity: 1,
@@ -138,12 +138,12 @@ const AITraining = () => {
     }
   };
 
-  const cardVariants = {
+  const cardVariants: Variants = {
     hidden: { opacity: 0, y: 20 },
     visible: { 
       opacity: 1, 
       y: 0,
-      transition: { duration: 0.5, ease: [0.4, 0, 0.2, 1] }
+      transition: { duration: 0.5, ease: "easeOut" }
     }
   };
 
@@ -170,7 +170,7 @@ const AITraining = () => {
           initial={{ opacity: 0, scale: 0.95 }}
           whileInView={{ opacity: 1, scale: 1 }}
           viewport={{ once: true }}
-          transition={{ duration: 0.8, ease: [0.4, 0, 0.2, 1] }}
+          transition={{ duration: 0.8, ease: "easeOut" }}
           className="w-full aspect-video bg-slate-100 rounded-[2rem] mb-20 flex flex-col items-center justify-center border-2 border-slate-200 group cursor-pointer hover:bg-slate-50 transition-all overflow-hidden relative shadow-inner"
         >
           <img 

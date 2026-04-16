@@ -21,9 +21,9 @@ const Navbar = () => {
     { name: 'Home', path: '/' },
     { name: 'AI Training', path: '/ai-training' },
     { name: 'Bar & Beyond', path: '/bar-beyond' },
-    { name: 'Naija Laws', path: '/naija-laws' },
     { name: 'LexAI', path: '/lex-ai' },
-    { name: 'Opportunities', path: '/opportunities' },
+    { name: 'Store', path: '/resource-store' },
+    { name: 'Naija Laws', path: '/naija-laws' },
     { name: 'About', path: '/about' },
     { name: 'Contact', path: '/contact' },
   ];

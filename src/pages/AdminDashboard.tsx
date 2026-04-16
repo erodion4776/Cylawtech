@@ -1,11 +1,54 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
-import { Shield, Upload, Settings, Database, DollarSign } from 'lucide-react';
+import { Shield, Upload, Settings, Database, DollarSign, Loader2, CheckCircle2 } from 'lucide-react';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 
 const AdminDashboard = () => {
   useDocumentTitle('CyAzor - Admin Dashboard');
   const [activeTab, setActiveTab] = useState('resources');
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [uploadStatus, setUploadStatus] = useState<string | null>(null);
+  const [adminData, setAdminData] = useState({
+    jurisdiction: 'nigeria',
+    difficulty: 'beginner',
+    productTag: 'general',
+    file: null as File | null
+  });
+
+  const handleProcessEmbed = async () => {
+    if (!adminData.file) {
+      alert("Please select a file first.");
+      return;
+    }
+
+    setIsProcessing(true);
+    setUploadStatus(null);
+
+    const formData = new FormData();
+    formData.append('file', adminData.file);
+    formData.append('jurisdiction', adminData.jurisdiction);
+    formData.append('difficulty', adminData.difficulty);
+    formData.append('productTag', adminData.productTag);
+
+    try {
+      const response = await fetch('/api/admin/embed', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const result = await response.json();
+      if (response.ok) {
+        setUploadStatus(`Success: ${result.message}`);
+        setAdminData({ ...adminData, file: null });
+      } else {
+        setUploadStatus(`Error: ${result.error}`);
+      }
+    } catch (error) {
+      setUploadStatus("Error: Failed to connect to server.");
+    } finally {
+      setIsProcessing(false);
+    }
+  };
 
   return (
     <div className="pt-24 pb-20 min-h-screen bg-slate-900 text-slate-300">
@@ -97,15 +140,83 @@ const AdminDashboard = () => {
                   <h3 className="font-bold text-white mb-2">Upload Knowledge Document</h3>
                   <p className="text-sm text-slate-400 mb-4">Documents uploaded here will be chunked, embedded, and stored in Supabase for RAG.</p>
                   
-                  <div className="flex gap-4 mb-4">
-                    <select className="bg-slate-900 border border-slate-700 rounded-xl px-4 py-2 text-white outline-none">
-                      <option value="general">Tag: General Knowledge</option>
-                      <option value="premium">Tag: Premium Product</option>
-                    </select>
-                    <input type="file" className="text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-700" />
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Jurisdiction</label>
+                      <select 
+                        value={adminData.jurisdiction}
+                        onChange={(e) => setAdminData({...adminData, jurisdiction: e.target.value})}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2 text-white outline-none"
+                      >
+                        <option value="nigeria">Nigeria Law</option>
+                        <option value="us">US Law</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Difficulty</label>
+                      <select 
+                        value={adminData.difficulty}
+                        onChange={(e) => setAdminData({...adminData, difficulty: e.target.value})}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2 text-white outline-none"
+                      >
+                        <option value="beginner">Beginner</option>
+                        <option value="intermediate">Intermediate</option>
+                        <option value="advanced">Advanced</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Product Tag</label>
+                      <select 
+                        value={adminData.productTag}
+                        onChange={(e) => setAdminData({...adminData, productTag: e.target.value})}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2 text-white outline-none"
+                      >
+                        <option value="general">General Knowledge</option>
+                        <option value="premium">Premium Product</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-500 uppercase mb-2">File (PDF ONLY)</label>
+                      <input 
+                        type="file" 
+                        accept=".pdf"
+                        onChange={(e) => setAdminData({...adminData, file: e.target.files?.[0] || null})}
+                        className="w-full text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-700" 
+                      />
+                    </div>
                   </div>
-                  <button className="bg-emerald-600 text-white px-6 py-2 rounded-xl font-bold hover:bg-emerald-700 transition-colors">
-                    Process & Embed
+                  
+                  {uploadStatus && (
+                    <div className={`mb-4 p-4 rounded-xl flex items-center gap-3 text-sm ${
+                      uploadStatus.startsWith('Success') ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'
+                    }`}>
+                      {uploadStatus.startsWith('Success') ? <CheckCircle2 size={16} /> : <Shield size={16} />}
+                      {uploadStatus}
+                    </div>
+                  )}
+
+                  <button 
+                    onClick={handleProcessEmbed}
+                    disabled={isProcessing}
+                    className="bg-emerald-600 text-white px-6 py-2 rounded-xl font-bold hover:bg-emerald-700 transition-colors disabled:opacity-50 flex items-center gap-2"
+                  >
+                    {isProcessing ? (
+                      <><Loader2 size={18} className="animate-spin" /> Processing...</>
+                    ) : (
+                      'Process & Embed'
+                    )}
+                  </button>
+                </div>
+
+                <div className="bg-slate-900/50 rounded-2xl p-6 border border-slate-700">
+                  <h3 className="font-bold text-white mb-4">Global Disclaimers</h3>
+                  <textarea 
+                    rows={3}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-blue-500 outline-none resize-none mb-4"
+                    defaultValue="LexAI is a developmental tool and does not constitute legal advice. Always consult with a qualified legal professional."
+                  ></textarea>
+                  <button className="bg-blue-600 text-white px-6 py-2 rounded-xl font-bold hover:bg-blue-700 transition-colors">
+                    Update Disclaimers
                   </button>
                 </div>
               </div>

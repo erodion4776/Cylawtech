@@ -6,9 +6,14 @@ import { createClient } from '@supabase/supabase-js';
 import Groq from "groq-sdk";
 import { GoogleGenAI } from "@google/genai";
 import { HfInference } from "@huggingface/inference";
+import multer from "multer";
+// @ts-ignore
+import pdf from "pdf-parse";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+const upload = multer({ storage: multer.memoryStorage() });
 
 // Initialize AI Clients
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY || 'dummy' });
@@ -19,6 +24,38 @@ const hf = new HfInference(process.env.HF_TOKEN || 'dummy');
 const supabaseUrl = process.env.SUPABASE_URL || 'https://dummy.supabase.co';
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || 'dummy';
 const supabase = createClient(supabaseUrl, supabaseKey);
+
+// Utility: Generate Embeddings using Gemini
+async function getEmbedding(text: string) {
+  try {
+    const model = (ai as any).getGenerativeModel({ model: "text-embedding-004"});
+    const result = await model.embedContent(text);
+    return result.embedding.values;
+  } catch (error) {
+    console.error("Embedding generation error:", error);
+    return null;
+  }
+}
+
+// Utility: Find relevant context from Supabase
+async function findRelevantContext(queryText: string, jurisdiction: string) {
+  const queryEmbedding = await getEmbedding(queryText);
+  if (!queryEmbedding) return "No context available due to embedding error.";
+
+  const { data, error } = await supabase.rpc('match_documents', {
+    query_embedding: queryEmbedding,
+    match_threshold: 0.5,
+    match_count: 5,
+    filter: { jurisdiction: jurisdiction }
+  });
+
+  if (error || !data || data.length === 0) {
+    console.log("No relevant documents found in Supabase:", error);
+    return `No official ${jurisdiction} statutes found in our current database. Please advise the user based on general legal principles.`;
+  }
+
+  return data.map((doc: any) => doc.content).join("\n\n---\n\n");
+}
 
 async function startServer() {
   const app = express();
@@ -34,18 +71,29 @@ async function startServer() {
   // LexAI Chat Endpoint (Practice Mode - RAG)
   app.post("/api/lexai/chat", async (req, res) => {
     try {
-      const { message } = req.body;
+      const { message, jurisdiction, stage, editorContent } = req.body;
       
-      // 1. Vector Search (Mocked for now since we don't have the actual DB schema)
-      // In a real scenario:
-      // const embedding = await createEmbedding(message);
-      // const { data: documents } = await supabase.rpc('match_documents', { query_embedding: embedding, match_threshold: 0.78, match_count: 5 });
+      const context = await findRelevantContext(message, jurisdiction);
+        
+      const hasPremiumTag = message.toLowerCase().includes("incorporate") || message.toLowerCase().includes("tax") || message.toLowerCase().includes("memo") || message.toLowerCase().includes("guide");
       
-      const mockContext = "Legal context retrieved from Supabase Vector Store.";
-      const hasPremiumTag = message.toLowerCase().includes("incorporate") || message.toLowerCase().includes("tax");
+      let stageInstructions = "";
+      if (stage === 'prep') {
+        stageInstructions = "Focus on IRAC frameworks and issue-spotting drills. Help the user structure their thoughts.";
+      } else if (stage === 'training') {
+        stageInstructions = `CRITIQUE MODE: Review the following text from the user's document editor and provide mentor-style feedback: "${editorContent || 'No content yet'}".`;
+      } else if (stage === 'practice') {
+        stageInstructions = "Provide templates for real-world memos and contracts. Guide the user through the drafting process.";
+      }
+
+      const systemPrompt = `You are a supportive, knowledgeable legal mentor. 
+      Personality: Conversational, relatable, no heavy jargon. Focus on teaching 'how to think'.
+      Jurisdiction: ${jurisdiction === 'nigeria' ? 'Nigerian Law' : 'US Law'}.
+      Current Stage: ${stage}.
+      ${stageInstructions}
       
-      const systemPrompt = `You are LexAI, a helpful legal assistant. Use the following context to answer the user's question: ${mockContext}.
-      ${hasPremiumTag ? "The user's query relates to a premium topic. At the end of your response, naturally recommend our 'Premium Tech Startup Incorporation Guide' available in the Resource Library for $49.99." : ""}`;
+      Use the following context to answer: ${context}.
+      ${hasPremiumTag ? "At the end of your response, naturally recommend our 'Premium Legal Drafting Guide' available in the Resource Store for $49.99." : ""}`;
 
       let responseText = "";
 
@@ -106,6 +154,43 @@ async function startServer() {
     } catch (error) {
       console.error("Grading API Error:", error);
       res.status(500).json({ error: "Failed to grade response" });
+    }
+  });
+
+  app.post("/api/admin/embed", upload.single("file"), async (req: any, res) => {
+    try {
+      const { jurisdiction, difficulty, productTag } = req.body;
+      const file = req.file;
+
+      if (!file) return res.status(400).json({ error: "No file provided" });
+
+      const data = await pdf(file.buffer);
+      const text = data.text;
+
+      // Simple chunking (by paragraph)
+      const chunks = text.split('\n\n').filter(p => p.trim().length > 100);
+
+      for (const chunk of chunks) {
+        const embedding = await getEmbedding(chunk);
+        if (embedding) {
+          const { error } = await supabase.from('documents').insert({
+            content: chunk,
+            embedding,
+            metadata: { 
+              jurisdiction, 
+              difficulty, 
+              productTag,
+              original_filename: file.originalname 
+            }
+          });
+          if (error) console.error("Supabase Insert Error:", error);
+        }
+      }
+
+      res.json({ message: `Successfully processed ${chunks.length} chunks from ${file.originalname}` });
+    } catch (error) {
+      console.error("Embedding API Error:", error);
+      res.status(500).json({ error: "Failed to process document" });
     }
   });
 

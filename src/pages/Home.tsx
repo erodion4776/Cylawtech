@@ -1,5 +1,5 @@
 import React from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence, Variants } from 'motion/react';
 import { ArrowRight, Brain, Scale, Globe, Zap, TrendingUp, Shield, PlayCircle, DollarSign } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { cn } from '../lib/utils';
@@ -229,7 +229,7 @@ const MicroLearning = () => {
 const Home = () => {
   useDocumentTitle('CyAzor LawTech Solutions - Law • Technology • Digital Growth');
 
-  const containerVariants = {
+  const containerVariants: Variants = {
     hidden: { opacity: 0 },
     visible: {
       opacity: 1,
@@ -239,12 +239,12 @@ const Home = () => {
     }
   };
 
-  const itemVariants = {
+  const itemVariants: Variants = {
     hidden: { opacity: 0, y: 20 },
     visible: { 
       opacity: 1, 
       y: 0,
-      transition: { duration: 0.6, ease: [0.4, 0, 0.2, 1] }
+      transition: { duration: 0.6, ease: "easeOut" }
     }
   };
 
@@ -380,7 +380,7 @@ const Home = () => {
               <motion.div
                 key={idx}
                 variants={itemVariants}
-                whileHover={{ y: -10, shadow: "0 20px 25px -5px rgb(0 0 0 / 0.1)" }}
+                whileHover={{ y: -10, boxShadow: "0 20px 25px -5px rgb(0 0 0 / 0.1)" }}
                 className="bg-white rounded-3xl shadow-sm border border-slate-100 flex flex-col items-start transition-all duration-300 overflow-hidden group"
               >
                 <div className="w-full h-40 overflow-hidden relative">

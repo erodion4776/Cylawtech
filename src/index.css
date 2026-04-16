@@ -5,9 +5,9 @@
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   
-  --color-brand-primary: #1e293b; /* slate-800 */
-  --color-brand-secondary: #64748b; /* slate-500 */
-  --color-brand-accent: #3b82f6; /* blue-500 */
+  --color-brand-primary: #1e3a8a; /* Royal Blue */
+  --color-brand-secondary: #d4af37; /* Gold */
+  --color-brand-accent: #1e3a8a;
   
   --radius-xl: 1rem;
   --radius-2xl: 1.5rem;
@@ -17,6 +17,14 @@
   body {
     @apply font-sans bg-white text-slate-900 antialiased;
   }
+}
+
+.gold-accent {
+  @apply text-[#d4af37] border-[#d4af37];
+}
+
+.royal-blue-bg {
+  @apply bg-[#1e3a8a];
 }
 
 .glass-card {
