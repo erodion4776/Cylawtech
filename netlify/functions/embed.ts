@@ -41,7 +41,8 @@ export const handler: Handler = async (event) => {
     // Simple chunking (by paragraph)
     const chunks = text.split('\n\n').filter((p: string) => p.trim().length > 100);
 
-    for (const chunk of chunks) {
+    // Process chunks concurrently to avoid 10-second Netlify timeout
+    const uploadPromises = chunks.map(async (chunk: string) => {
       const embedding = await getEmbedding(chunk);
       if (embedding) {
         const { error } = await supabase.from('documents').insert({
@@ -56,7 +57,9 @@ export const handler: Handler = async (event) => {
         });
         if (error) console.error("Supabase Insert Error:", error);
       }
-    }
+    });
+
+    await Promise.all(uploadPromises);
 
     return {
       statusCode: 200,

@@ -44,12 +44,19 @@ const AdminDashboard = () => {
           body: JSON.stringify(payload),
         });
 
-        const result = await response.json();
+        let result;
+        const contentType = response.headers.get("content-type");
+        if (contentType && contentType.includes("application/json")) {
+          result = await response.json();
+        } else {
+          result = { error: `Server error: ${response.status} ${response.statusText}` };
+        }
+
         if (response.ok) {
-          setUploadStatus(`Success: ${result.message}`);
+          setUploadStatus(`Success: ${result?.message}`);
           setAdminData({ ...adminData, file: null });
         } else {
-          setUploadStatus(`Error: ${result.error}`);
+          setUploadStatus(`Error: ${result?.error || result?.errorMessage || response.statusText || 'Unknown error. Check Netlify Functions logs.'}`);
         }
         setIsProcessing(false);
       };
