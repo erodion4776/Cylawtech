@@ -12,9 +12,14 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 
 async function getEmbedding(text: string) {
   try {
-    const model = (ai as any).getGenerativeModel({ model: "text-embedding-004"});
-    const result = await model.embedContent(text);
-    return result.embedding.values;
+    const result = await ai.models.embedContent({
+      model: "text-embedding-004",
+      contents: text
+    });
+    if (result.embeddings && result.embeddings.length > 0) {
+      return result.embeddings[0].values;
+    }
+    return null;
   } catch (error) {
     console.error("Embedding generation error:", error);
     return null;
@@ -50,6 +55,8 @@ export const handler: Handler = async (event) => {
 
     // Process chunks in batches to avoid OOM socket exhaustion
     let processedCount = 0;
+    let embedErrorCount = 0;
+    let dbErrorCount = 0;
     const batchSize = 10;
     const startTime = Date.now();
 
@@ -77,9 +84,12 @@ export const handler: Handler = async (event) => {
           });
           if (error) {
             console.error("Supabase Insert Error:", error);
+            dbErrorCount++;
           } else {
             processedCount++;
           }
+        } else {
+          embedErrorCount++;
         }
       });
 
@@ -90,7 +100,7 @@ export const handler: Handler = async (event) => {
       statusCode: 200,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ 
-        message: `Successfully processed ${processedCount} of ${chunks.length} chunks from ${filename}${processedCount < chunks.length ? ' (Truncated to fit platform time limit)' : ''}` 
+        message: `Successfully processed ${processedCount} of ${chunks.length} chunks from ${filename}${processedCount < chunks.length ? ' (Truncated to fit platform time limit)' : ''}. Errors - Embed: ${embedErrorCount}, DB: ${dbErrorCount}` 
       })
     };
   } catch (error: any) {
