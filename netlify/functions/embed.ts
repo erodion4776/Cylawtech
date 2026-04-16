@@ -1,15 +1,9 @@
 import { Handler } from '@netlify/functions';
 import { GoogleGenAI } from "@google/genai";
 import { createClient } from "@supabase/supabase-js";
-import DOMMatrix from 'dommatrix';
-
-// Fix for pdf-parse "DOMMatrix is not defined" error in Node environments
-if (typeof global.DOMMatrix === 'undefined') {
-  (global as any).DOMMatrix = DOMMatrix;
-}
 
 // @ts-ignore
-const { PDFParse } = require("pdf-parse");
+const pdf = require("pdf-parse");
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || 'dummy' });
 const supabaseUrl = process.env.SUPABASE_URL || 'https://dummy.supabase.co';
@@ -44,11 +38,8 @@ export const handler: Handler = async (event) => {
     currentStep = "Decoding Base64 to Buffer";
     const buffer = Buffer.from(fileBase64, 'base64');
     
-    currentStep = "Initializing PDFParse class";
-    const parser = new PDFParse({ data: buffer });
-    
     currentStep = "Parsing PDF text";
-    const data = await parser.getText();
+    const data = await pdf(buffer);
     const text = data.text;
 
     currentStep = "Chunking parsed text";
