@@ -151,9 +151,9 @@ const LexAI = () => {
       </header>
 
       {/* Main Workspace */}
-      <div className="flex-grow flex flex-col md:flex-row overflow-hidden h-[calc(100vh-140px)]">
-        {/* Left Side: AI Mentor Chat */}
-        <div className="w-full md:w-[400px] lg:w-[450px] border-r border-slate-200 flex flex-col bg-slate-50">
+      <div className="flex-grow flex flex-col overflow-hidden h-[calc(100vh-140px)]">
+        {/* Full Width: AI Mentor Chat */}
+        <div className="w-full max-w-4xl mx-auto border-x border-slate-200 flex flex-col bg-slate-50 h-full">
           <div className="p-4 border-b border-slate-200 bg-white flex items-center justify-between">
             <div className="flex items-center gap-2">
               <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
@@ -239,31 +239,6 @@ const LexAI = () => {
             <p className="text-[10px] text-center text-slate-400 mt-2">
               LexAI can make mistakes. Verify important legal information.
             </p>
-          </div>
-        </div>
-
-        {/* Right Side: Document Editor */}
-        <div className="flex-grow flex flex-col bg-white p-6">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-3">
-              <FileText className="text-[#1e3a8a]" size={20} />
-              <h3 className="font-bold text-slate-900">Document Editor</h3>
-            </div>
-            <div className="flex items-center gap-2">
-              <button className="px-4 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">
-                Save Draft
-              </button>
-              <button 
-                onClick={() => setMode('training')}
-                className="px-4 py-1.5 text-xs font-bold bg-[#d4af37] text-white rounded-lg shadow-sm hover:shadow-md transition-all flex items-center gap-2"
-              >
-                <Sparkles size={14} /> Critique Mode
-              </button>
-            </div>
-          </div>
-          
-          <div className="flex-grow">
-            <TipTapEditor content={editorContent} onChange={setEditorContent} />
           </div>
         </div>
       </div>
