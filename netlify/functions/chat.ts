@@ -6,7 +6,7 @@ import { createClient } from "@supabase/supabase-js";
 
 // Initialize AI Clients
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY || 'dummy' });
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || 'dummy' });
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
 const hf = new HfInference(process.env.HF_TOKEN || 'dummy');
 
 // Initialize Supabase
@@ -16,6 +16,7 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 
 async function getEmbedding(text: string) {
   try {
+    console.log(`Generating embedding for text: ${text.substring(0, 50)}...`);
     const result = await ai.models.embedContent({
       model: "gemini-embedding-2-preview",
       contents: text,
@@ -24,19 +25,26 @@ async function getEmbedding(text: string) {
       }
     });
     if (result.embeddings && result.embeddings.length > 0) {
+      console.log("Embedding generated successfully.");
       return result.embeddings[0].values;
     }
+    console.error("No embeddings found in result.");
     return null;
   } catch (error) {
-    console.error("Embedding generation error:", error);
+    console.error("Embedding generation error in chat.ts:", error);
     return null;
   }
 }
 
 async function findRelevantContext(queryText: string, jurisdiction: string) {
+  console.log(`Finding context for jurisdiction: ${jurisdiction}`);
   const queryEmbedding = await getEmbedding(queryText);
-  if (!queryEmbedding) return "No context available due to embedding error.";
+  if (!queryEmbedding) {
+     console.error("Failed to get query embedding.");
+     return "No context available due to embedding error.";
+  }
 
+  console.log("Searching Supabase for relevant documents...");
   const { data, error } = await supabase.rpc('match_documents', {
     query_embedding: queryEmbedding,
     match_threshold: 0.5,
@@ -44,10 +52,17 @@ async function findRelevantContext(queryText: string, jurisdiction: string) {
     filter: { jurisdiction: jurisdiction }
   });
 
-  if (error || !data || data.length === 0) {
+  if (error) {
+    console.error("Supabase RPC error:", error);
+    return `Error searching database: ${error.message}`;
+  }
+
+  if (!data || data.length === 0) {
+    console.log("No relevant documents found.");
     return `No official ${jurisdiction} statutes found in our current database. Please advise the user based on general legal principles.`;
   }
 
+  console.log(`Found ${data.length} relevant context chunks.`);
   return data.map((doc: any) => doc.content).join("\n\n---\n\n");
 }
 
@@ -60,6 +75,7 @@ export const handler: Handler = async (event) => {
     const { message, jurisdiction, stage, editorContent } = JSON.parse(event.body || '{}');
     
     const context = await findRelevantContext(message, jurisdiction);
+    console.log(`Context search complete. Found context: ${context.length > 0}`);
       
     const hasPremiumTag = message.toLowerCase().includes("incorporate") || message.toLowerCase().includes("tax") || message.toLowerCase().includes("memo") || message.toLowerCase().includes("guide");
     
@@ -83,30 +99,49 @@ export const handler: Handler = async (event) => {
 
     let responseText = "";
 
+    // Fallback chain: Groq -> Gemini -> HuggingFace
     try {
-      if (message.length > 2000) throw new Error("Too long for Groq, fallback to Gemini");
-      const completion = await groq.chat.completions.create({
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: message }
-        ],
-        model: "mixtral-8x7b-32768",
-      });
-      responseText = completion.choices[0]?.message?.content || "";
+      if (process.env.GROQ_API_KEY && process.env.GROQ_API_KEY !== 'dummy') {
+        const completion = await groq.chat.completions.create({
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: message }
+          ],
+          model: "mixtral-8x7b-32768",
+        });
+        responseText = completion.choices[0]?.message?.content || "";
+      } else {
+        throw new Error("GROQ_API_KEY not set");
+      }
     } catch (groqError) {
+      console.log("GROQ failed or skipped, trying Gemini...");
       try {
-        const geminiResponse = await ai.models.generateContent({
-          model: 'gemini-3.1-pro-preview',
+        const geminiRes = await ai.models.generateContent({
+          model: 'gemini-3-flash-preview',
           contents: systemPrompt + "\n\nUser: " + message,
         });
-        responseText = geminiResponse.text || "";
-      } catch (geminiError) {
-        const hfResponse = await hf.textGeneration({
-          model: "meta-llama/Llama-2-7b-chat-hf",
-          inputs: systemPrompt + "\n\nUser: " + message,
-        });
-        responseText = hfResponse.generated_text || "I'm sorry, all AI providers are currently unavailable.";
+        responseText = geminiRes.text || "";
+      } catch (geminiError: any) {
+        console.error("Gemini failed:", geminiError);
+        try {
+          if (process.env.HF_TOKEN && process.env.HF_TOKEN !== 'dummy') {
+            const hfResponse = await hf.textGeneration({
+              model: "meta-llama/Llama-2-7b-chat-hf",
+              inputs: systemPrompt + "\n\nUser: " + message,
+            });
+            responseText = hfResponse.generated_text || "";
+          } else {
+             throw new Error("HF_TOKEN not set");
+          }
+        } catch (hfError) {
+          console.error("HuggingFace failed:", hfError);
+          responseText = "";
+        }
       }
+    }
+
+    if (!responseText) {
+       throw new Error("We are currently experiencing high traffic. Please try again in a few moments.");
     }
 
     return {
@@ -114,11 +149,14 @@ export const handler: Handler = async (event) => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ response: responseText })
     };
-  } catch (error) {
+  } catch (error: any) {
     console.error("Chat API Error:", error);
     return {
       statusCode: 500,
-      body: JSON.stringify({ error: "Failed to process chat request" })
+      body: JSON.stringify({ 
+        error: "Failed to process chat request", 
+        details: error.message || String(error)
+      })
     };
   }
 };

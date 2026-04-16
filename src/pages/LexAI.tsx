@@ -58,9 +58,18 @@ const LexAI = () => {
       });
       const data = await res.json();
       
+      if (data.error) {
+        throw new Error(data.error);
+      }
+
+      if (!data.response) {
+        throw new Error("Empty response from AI");
+      }
+      
       // Check for keywords to suggest resources
       let suggestedResource = null;
-      if (data.response.toLowerCase().includes("premium") || data.response.toLowerCase().includes("guide")) {
+      const lowerResponse = data.response.toLowerCase();
+      if (lowerResponse.includes("premium") || lowerResponse.includes("guide")) {
         suggestedResource = {
           title: "Premium Legal Drafting Guide",
           price: "$49.99",
@@ -70,9 +79,10 @@ const LexAI = () => {
       }
 
       setChatHistory(prev => [...prev, { role: 'ai', content: data.response, suggestedResource }]);
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
-      setChatHistory(prev => [...prev, { role: 'ai', content: "I'm having trouble connecting to my knowledge base. Please try again." }]);
+      const errorMsg = error.message || "I'm having trouble connecting to my knowledge base. Please try again.";
+      setChatHistory(prev => [...prev, { role: 'ai', content: `**Error:** ${errorMsg}\n\nPlease try again.` }]);
     } finally {
       setIsChatting(false);
     }

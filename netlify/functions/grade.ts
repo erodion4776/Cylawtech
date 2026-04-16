@@ -1,7 +1,7 @@
 import { Handler } from '@netlify/functions';
 import { GoogleGenAI } from "@google/genai";
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || 'dummy' });
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
 
 export const handler: Handler = async (event) => {
   if (event.httpMethod !== 'POST') {
