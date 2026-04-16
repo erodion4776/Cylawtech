@@ -33,6 +33,7 @@ export const handler: Handler = async (event) => {
 
   let currentStep = "Initializing";
   let lastEmbedError = "";
+  let lastDbError = "";
   try {
     currentStep = "Parsing JSON Body";
     const { fileBase64, filename, jurisdiction, difficulty, productTag } = JSON.parse(event.body || '{}');
@@ -82,8 +83,9 @@ export const handler: Handler = async (event) => {
             }
           });
           if (error) {
-            console.error("Supabase Insert Error:", error);
+            console.error(`Supabase Insert Error (Dimension: ${embedding.length}):`, error);
             dbErrorCount++;
+            lastDbError = `${error.message} (Vector Size: ${embedding.length})` || JSON.stringify(error);
           } else {
             processedCount++;
           }
@@ -99,7 +101,10 @@ export const handler: Handler = async (event) => {
     let finalMessage = `Processed ${processedCount} of ${chunks.length} chunks from ${filename}${processedCount < chunks.length ? ' (Truncated due to time limit)' : ''}. Errors - Embed: ${embedErrorCount}, DB: ${dbErrorCount}`;
     
     if (embedErrorCount > 0 && lastEmbedError) {
-       finalMessage += ` | Embed Error Details: ${lastEmbedError}`;
+       finalMessage += ` | Embed Error: ${lastEmbedError}`;
+    }
+    if (dbErrorCount > 0 && lastDbError) {
+       finalMessage += ` | DB Error: ${lastDbError}`;
     }
 
     // If zero chunks succeeded but we had chunks, return an error status so the frontend shows it as a failure
@@ -109,7 +114,7 @@ export const handler: Handler = async (event) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           error: finalMessage,
-          details: lastEmbedError
+          details: lastEmbedError || lastDbError
         })
       };
     }
