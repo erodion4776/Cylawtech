@@ -41,36 +41,56 @@ export const handler: Handler = async (event) => {
     // Simple chunking (by paragraph)
     const chunks = text.split('\n\n').filter((p: string) => p.trim().length > 100);
 
-    // Process chunks concurrently to avoid 10-second Netlify timeout
-    const uploadPromises = chunks.map(async (chunk: string) => {
-      const embedding = await getEmbedding(chunk);
-      if (embedding) {
-        const { error } = await supabase.from('documents').insert({
-          content: chunk,
-          embedding,
-          metadata: { 
-            jurisdiction, 
-            difficulty, 
-            productTag,
-            original_filename: filename 
-          }
-        });
-        if (error) console.error("Supabase Insert Error:", error);
-      }
-    });
+    // Process chunks in batches to avoid OOM socket exhaustion
+    let processedCount = 0;
+    const batchSize = 10;
+    const startTime = Date.now();
 
-    await Promise.all(uploadPromises);
+    for (let i = 0; i < chunks.length; i += batchSize) {
+      // Check if we approach the 10s Netlify timeout (stop at 7.5 seconds to be safe)
+      if (Date.now() - startTime > 7500) {
+        console.warn('Approaching Netlify timeout limit. Stopping early.');
+        break;
+      }
+
+      const batch = chunks.slice(i, i + batchSize);
+      
+      const uploadPromises = batch.map(async (chunk: string) => {
+        const embedding = await getEmbedding(chunk);
+        if (embedding) {
+          const { error } = await supabase.from('documents').insert({
+            content: chunk,
+            embedding,
+            metadata: { 
+              jurisdiction, 
+              difficulty, 
+              productTag,
+              original_filename: filename 
+            }
+          });
+          if (error) {
+            console.error("Supabase Insert Error:", error);
+          } else {
+            processedCount++;
+          }
+        }
+      });
+
+      await Promise.all(uploadPromises);
+    }
 
     return {
       statusCode: 200,
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: `Successfully processed ${chunks.length} chunks from ${filename}` })
+      body: JSON.stringify({ 
+        message: `Successfully processed ${processedCount} of ${chunks.length} chunks from ${filename}${processedCount < chunks.length ? ' (Truncated to fit platform time limit)' : ''}` 
+      })
     };
-  } catch (error) {
+  } catch (error: any) {
     console.error("Embedding API Error:", error);
     return {
       statusCode: 500,
-      body: JSON.stringify({ error: "Failed to process document" })
+      body: JSON.stringify({ error: `Failed to process document: ${error.message || 'Unknown error'}` })
     };
   }
 };
