@@ -64,7 +64,15 @@ async function startServer() {
   }
 
   // API Routes
-  app.post("/api/chat", async (req, res) => {
+  app.use((req, res, next) => {
+    if (req.url.startsWith('/api') || req.url.startsWith('/.netlify/functions')) {
+      console.log(`[API REQUEST] ${req.method} ${req.url}`);
+    }
+    next();
+  });
+
+  const handleChat = async (req: express.Request, res: express.Response) => {
+    console.log(`[SERVER] Chat request received for jurisdiction: ${req.body.jurisdiction}`);
     try {
       const { message, jurisdiction, stage, editorContent } = req.body;
       const context = await findRelevantContext(message, jurisdiction);
@@ -108,23 +116,9 @@ async function startServer() {
     } catch (error: any) {
       res.status(500).json({ error: "Chat failed", details: error.message });
     }
-  });
+  };
 
-  app.post("/api/grade", async (req, res) => {
-    try {
-      const { scenario, userResponse } = req.body;
-      const systemPrompt = `Grade this legal response. Scenario: ${scenario}. User: ${userResponse}`;
-      const geminiResponse = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: systemPrompt,
-      });
-      res.json({ feedback: geminiResponse.text });
-    } catch (error: any) {
-      res.status(500).json({ error: "Grading failed" });
-    }
-  });
-
-  app.post("/api/embed", async (req, res) => {
+  const handleEmbed = async (req: express.Request, res: express.Response) => {
     try {
       const { fileBase64, filename, jurisdiction, difficulty, productTag } = req.body;
       if (!fileBase64) return res.status(400).json({ error: "No file" });
@@ -152,7 +146,29 @@ async function startServer() {
     } catch (error: any) {
       res.status(500).json({ error: "Embedding failed", details: error.message });
     }
-  });
+  };
+
+  const handleGrade = async (req: express.Request, res: express.Response) => {
+    try {
+      const { scenario, userResponse } = req.body;
+      const systemPrompt = `Grade this legal response. Scenario: ${scenario}. User: ${userResponse}`;
+      const geminiResponse = await ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: systemPrompt,
+      });
+      res.json({ feedback: geminiResponse.text });
+    } catch (error: any) {
+      res.status(500).json({ error: "Grading failed" });
+    }
+  };
+
+  // Support both /api and /.netlify/functions paths
+  app.post("/api/chat", handleChat);
+  app.post("/.netlify/functions/chat", handleChat);
+  app.post("/api/embed", handleEmbed);
+  app.post("/.netlify/functions/embed", handleEmbed);
+  app.post("/api/grade", handleGrade);
+  app.post("/.netlify/functions/grade", handleGrade);
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
