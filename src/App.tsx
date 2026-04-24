@@ -13,6 +13,7 @@ import About from './pages/About';
 import Contact from './pages/Contact';
 import Legal from './pages/Legal';
 import LexAI from './pages/LexAI';
+import LexAIStandalone from './pages/LexAIStandalone';
 import AdminDashboard from './pages/AdminDashboard';
 import ResourceStore from './pages/ResourceStore';
 import PageTransition from './components/PageTransition';
@@ -33,6 +34,7 @@ const AnimatedRoutes = () => {
     <AnimatePresence mode="wait">
       <motion.div key={location.pathname} className="flex-grow flex flex-col">
         <Routes location={location}>
+          <Route path="/lex-ai-embed" element={<LexAIStandalone />} />
           <Route path="/" element={<PageTransition><Home /></PageTransition>} />
           <Route path="/ai-training" element={<PageTransition><AITraining /></PageTransition>} />
           <Route path="/bar-beyond" element={<PageTransition><BarBeyond /></PageTransition>} />
@@ -55,13 +57,23 @@ export default function App() {
     <Router>
       <ScrollToTop />
       <ScrollProgress />
-      <div className="min-h-screen flex flex-col">
-        <Navbar />
-        <main className="flex-grow">
-          <AnimatedRoutes />
-        </main>
-        <Footer />
-      </div>
+      <AppContent />
     </Router>
+  );
+}
+
+const AppContent = () => {
+  const location = useLocation();
+  const query = new URLSearchParams(location.search);
+  const isEmbed = location.pathname.includes('embed') || query.get('embed') === 'true';
+
+  return (
+    <div className="min-h-screen flex flex-col">
+      {!isEmbed && <Navbar />}
+      <main className="flex-grow flex flex-col">
+        <AnimatedRoutes />
+      </main>
+      {!isEmbed && <Footer />}
+    </div>
   );
 }

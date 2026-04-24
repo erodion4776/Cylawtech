@@ -56,8 +56,8 @@ const AdminDashboard = () => {
              addLog(`WARNING: Payload is very large (${payloadSizeMb} MB). Netlify AWS Lambda limit is typically 6MB. This might cause a 502/413 Proxy error!`);
           }
 
-          addLog(`Sending POST request to /.netlify/functions/embed...`);
-          const response = await fetch('/.netlify/functions/embed', {
+          addLog(`Sending POST request to /api/embed...`);
+          const response = await fetch('/api/embed', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: payloadString,

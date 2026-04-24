@@ -19,7 +19,16 @@ const Legal = () => {
     }
   };
 
-  const page = content[type || 'privacy'] || content['privacy'];
+  const page = content[type || 'privacy'];
+
+  if (!page) {
+    return (
+      <div className="pt-24 pb-20 px-6 text-center">
+        <h1 className="text-4xl font-bold text-slate-900 mb-4">404 - Page Not Found</h1>
+        <p className="text-slate-600">The legal page you are looking for does not exist.</p>
+      </div>
+    );
+  }
 
   return (
     <div className="pt-24 pb-20">
