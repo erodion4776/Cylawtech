@@ -64,18 +64,21 @@ export default function AdminSaaS() {
       const res = await fetch(`${API_BASE}/settings`, {
         headers: { 'x-admin-key': adminKey }
       });
+      
+      const data = await res.json();
+      
       if (res.ok) {
-        const data = await res.json();
         setSettings(data);
         setIsAuth(true);
         localStorage.setItem('lex_admin_key', adminKey);
         fetchData();
       } else {
         setIsAuth(false);
-        setError("Invalid Admin Key");
+        setError(data.error || "Authorization failed");
       }
-    } catch (e) {
-      setError("Server connection failed");
+    } catch (e: any) {
+      setError(`Connection Error: ${e.message || "Unknown error"}`);
+      console.error("Admin Auth Error:", e);
     } finally {
       setLoading(false);
     }
