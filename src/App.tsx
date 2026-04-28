@@ -15,6 +15,7 @@ import Legal from './pages/Legal';
 import LexAI from './pages/LexAI';
 import LexAIStandalone from './pages/LexAIStandalone';
 import AdminDashboard from './pages/AdminDashboard';
+import AdminSaaS from './pages/AdminSaaS';
 import ResourceStore from './pages/ResourceStore';
 import PageTransition from './components/PageTransition';
 import ScrollProgress from './components/ScrollProgress';
@@ -44,6 +45,7 @@ const AnimatedRoutes = () => {
           <Route path="/contact" element={<PageTransition><Contact /></PageTransition>} />
           <Route path="/lex-ai" element={<PageTransition><LexAI /></PageTransition>} />
           <Route path="/admin" element={<PageTransition><AdminDashboard /></PageTransition>} />
+          <Route path="/saas-admin" element={<PageTransition><AdminSaaS /></PageTransition>} />
           <Route path="/resource-store" element={<PageTransition><ResourceStore /></PageTransition>} />
           <Route path="/:type" element={<PageTransition><Legal /></PageTransition>} />
         </Routes>
