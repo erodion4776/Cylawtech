@@ -50,6 +50,13 @@ export default function AdminSaaS() {
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
   const [docs, setDocs] = useState<Document[]>([]);
   const [loading, setLoading] = useState(false);
+  const [uploadDiagnostics, setUploadDiagnostics] = useState<{
+    status: 'idle' | 'loading' | 'success' | 'error';
+    message: string;
+    lastStep?: string;
+    details?: string;
+    timestamp?: string;
+  }>({ status: 'idle', message: '' });
   const [testLoading, setTestLoading] = useState(false);
   const [testResponse, setTestResponse] = useState<{status: number, data: any} | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -677,15 +684,30 @@ export default function AdminSaaS() {
                           })
                         });
                         if (res.ok) {
-                          alert("Knowledge indexed successfully!");
+                          setUploadDiagnostics({
+                            status: 'success',
+                            message: 'Document successfully parsed and indexed.',
+                            timestamp: new Date().toLocaleTimeString()
+                          });
                           fetchData();
                           form.reset();
                         } else {
                           const data = await res.json();
-                          alert(`Upload failed: ${data.error || data.details || "Unknown error"}`);
+                          setUploadDiagnostics({
+                            status: 'error',
+                            message: data.error || 'Indexing failed',
+                            details: data.details || 'Check server logs for more info',
+                            lastStep: data.step || 'Unknown',
+                            timestamp: new Date().toLocaleTimeString()
+                          });
                         }
                       } catch (err: any) {
-                        alert(`Upload failed: ${err.message || "Connection error"}`);
+                        setUploadDiagnostics({
+                          status: 'error',
+                          message: 'Connection error during upload',
+                          details: err.message,
+                          timestamp: new Date().toLocaleTimeString()
+                        });
                       } finally {
                         setLoading(false);
                       }
@@ -719,6 +741,65 @@ export default function AdminSaaS() {
                    </button>
                  </form>
                </div>
+
+               {uploadDiagnostics.status !== 'idle' && (
+                 <motion.div 
+                   initial={{ opacity: 0, y: 10 }}
+                   animate={{ opacity: 1, y: 0 }}
+                   className={`mb-10 border rounded-2xl overflow-hidden shadow-xl ${
+                     uploadDiagnostics.status === 'success' ? 'bg-emerald-500/5 border-emerald-500/20' :
+                     uploadDiagnostics.status === 'error' ? 'bg-rose-500/5 border-rose-500/20' :
+                     'bg-blue-500/5 border-blue-500/20'
+                   }`}
+                 >
+                   <div className="px-6 py-4 border-b border-slate-900 flex items-center justify-between">
+                     <div className="flex items-center gap-3">
+                       {uploadDiagnostics.status === 'loading' && <div className="w-2 h-2 bg-blue-500 rounded-full animate-ping"></div>}
+                       {uploadDiagnostics.status === 'success' && <CheckCircle2 className="w-4 h-4 text-emerald-500" />}
+                       {uploadDiagnostics.status === 'error' && <AlertCircle className="w-4 h-4 text-rose-500" />}
+                       <h4 className="text-sm font-bold text-white uppercase tracking-wider">Upload Diagnostics</h4>
+                     </div>
+                     <span className="text-[10px] text-slate-500 font-mono">{uploadDiagnostics.timestamp}</span>
+                   </div>
+                   <div className="p-6">
+                     <div className="flex flex-col gap-1 mb-4">
+                       <span className="text-xs uppercase font-bold text-slate-500 tracking-widest">General Status</span>
+                       <p className={`text-sm font-medium ${
+                         uploadDiagnostics.status === 'success' ? 'text-emerald-400' :
+                         uploadDiagnostics.status === 'error' ? 'text-rose-400' :
+                         'text-blue-400'
+                       }`}>
+                         {uploadDiagnostics.message}
+                       </p>
+                     </div>
+
+                     {uploadDiagnostics.lastStep && (
+                       <div className="flex flex-col gap-1 mb-4">
+                         <span className="text-xs uppercase font-bold text-slate-500 tracking-widest">Failure Stage</span>
+                         <div className="flex items-center gap-2 text-rose-300 font-mono text-xs bg-rose-500/10 p-2 rounded border border-rose-500/20">
+                           <span className="px-1.5 py-0.5 bg-rose-500 text-white rounded text-[10px] font-bold">STEP</span>
+                           {uploadDiagnostics.lastStep}
+                         </div>
+                       </div>
+                     )}
+
+                     {uploadDiagnostics.details && (
+                       <div className="flex flex-col gap-1">
+                         <span className="text-xs uppercase font-bold text-slate-500 tracking-widest">Technical Details</span>
+                         <pre className="text-[10px] text-slate-400 bg-slate-950 p-4 rounded-xl border border-slate-900 overflow-x-auto whitespace-pre-wrap leading-relaxed">
+                           {uploadDiagnostics.details}
+                         </pre>
+                       </div>
+                     )}
+
+                     {uploadDiagnostics.status === 'success' && (
+                       <div className="mt-2 text-xs text-emerald-500/70 italic">
+                         Optimization complete. Content is now searchable by the AI agents.
+                       </div>
+                     )}
+                   </div>
+                 </motion.div>
+               )}
 
                <div className="bg-[#0c0c0c] border border-slate-900 rounded-2xl">
                  <div className="p-6 border-b border-slate-900 flex justify-between items-center">
