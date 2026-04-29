@@ -1,8 +1,9 @@
 import { Handler } from '@netlify/functions';
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { createClient } from "@supabase/supabase-js";
+import { createRequire } from 'module';
 
-// @ts-ignore
+const require = createRequire(import.meta.url);
 const pdf = require("pdf-parse-debugging-disabled");
 
 const ai = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || 'dummy');
@@ -40,12 +41,19 @@ export const handler: Handler = async (event) => {
     return { statusCode: 405, headers, body: 'Method Not Allowed' };
   }
 
+  const adminKey = event.headers['x-admin-key'];
+  if (!adminKey || adminKey !== process.env.ADMIN_KEY) {
+    console.error("Unauthorized attempt to access embed endpoint");
+    return { statusCode: 403, headers, body: JSON.stringify({ error: "Forbidden: Invalid Admin Key" }) };
+  }
+
   let currentStep = "Initializing";
   let lastEmbedError = "";
   let lastDbError = "";
   try {
     currentStep = "Parsing JSON Body";
-    const { fileBase64, filename, site, context: uploadContext, jurisdiction, difficulty, productTag } = JSON.parse(event.body || '{}');
+    const body = JSON.parse(event.body || '{}');
+    const { fileBase64, filename, site, context: uploadContext, jurisdiction, difficulty, productTag } = body;
 
     if (!fileBase64) {
       return { statusCode: 400, headers, body: JSON.stringify({ error: "No file provided" }) };
@@ -54,13 +62,33 @@ export const handler: Handler = async (event) => {
     currentStep = "Decoding Base64 to Buffer";
     const buffer = Buffer.from(fileBase64, 'base64');
     
-    currentStep = "Parsing PDF text";
-    const data = await pdf(buffer);
-    const text = data.text;
+    let text = "";
+    if (filename?.toLowerCase().endsWith('.pdf')) {
+      currentStep = "Parsing PDF text";
+      try {
+        const data = await pdf(buffer);
+        text = data.text;
+      } catch (pdfErr: any) {
+        console.error("PDF Parse Error:", pdfErr);
+        throw new Error(`Failed to parse PDF: ${pdfErr.message}`);
+      }
+    } else {
+      currentStep = "Reading text content";
+      text = buffer.toString('utf-8');
+    }
+
+    if (!text || text.trim().length === 0) {
+      throw new Error("Extracted text is empty. The file might be corrupted or unreadable.");
+    }
 
     currentStep = "Chunking parsed text";
-    // Simple chunking (by paragraph)
-    const chunks = text.split('\n\n').filter((p: string) => p.trim().length > 100);
+    // Improved chunking (by paragraphs with length filtering)
+    const chunks = text.split(/\n\s*\n/).map(p => p.trim()).filter((p: string) => p.length > 50);
+    
+    if (chunks.length === 0 && text.length > 0) {
+      // Fallback for files without double newlines
+      chunks.push(text.substring(0, 5000));
+    }
 
     currentStep = "Processing chunks sequentially";
 

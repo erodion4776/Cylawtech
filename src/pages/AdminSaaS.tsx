@@ -680,9 +680,12 @@ export default function AdminSaaS() {
                           alert("Knowledge indexed successfully!");
                           fetchData();
                           form.reset();
+                        } else {
+                          const data = await res.json();
+                          alert(`Upload failed: ${data.error || data.details || "Unknown error"}`);
                         }
-                      } catch (err) {
-                        alert("Upload failed");
+                      } catch (err: any) {
+                        alert(`Upload failed: ${err.message || "Connection error"}`);
                       } finally {
                         setLoading(false);
                       }
