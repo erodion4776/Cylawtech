@@ -117,10 +117,11 @@ export const handler: Handler = async (event) => {
     if (method === 'GET' && path === 'test-db') {
       const diagnostics: any = {
         supabase: {
-          url: supabaseUrl.replace(/\/\/[^:]+:[^@]+@/, '//***:***@'), // mask potential secrets
+          url: supabaseUrl.replace(/\/\/[^:]+:[^@]+@/, '//***:***@'),
           status: 'unknown'
         },
-        tables: {}
+        tables: {},
+        embedding_check: 'none'
       };
 
       try {
@@ -135,6 +136,43 @@ export const handler: Handler = async (event) => {
         // Check settings table
         const { data: setData, error: setError } = await supabase.from('settings').select('count', { count: 'exact', head: true });
         diagnostics.tables.settings = setError ? { status: 'error', error: setError } : { status: 'ok', count: setData };
+
+        // Test Gemini Embedding
+        try {
+          const aiModel = new (require('@google/generative-ai').GoogleGenerativeAI)(process.env.GEMINI_API_KEY);
+          const model = aiModel.getGenerativeModel({ model: "text-embedding-004" });
+          const res = await model.embedContent("Diagnostic test");
+          if (res.embedding) {
+            diagnostics.gemini = { status: 'ok', dimension: res.embedding.values.length };
+          } else {
+            diagnostics.gemini = { status: 'error', error: 'No embedding returned' };
+          }
+        } catch (gemErr: any) {
+          diagnostics.gemini = { status: 'error', error: gemErr.message };
+        }
+
+        // Test insertion of a dummy vector (768 dimensions)
+        const dummyVector = new Array(768).fill(0);
+        const { error: insertError } = await supabase.from('documents').insert({
+          content: 'DIAGNOSTIC_TEST_ENTRY',
+          embedding: dummyVector,
+          site: 'diagnostic',
+          context: 'test'
+        }).select();
+
+        if (insertError) {
+          diagnostics.embedding_check = { 
+            status: 'failed', 
+            error: insertError.message, 
+            code: insertError.code,
+            hint: insertError.hint || 'Could be a dimension mismatch (Expected 1536 but got 768?)' 
+          };
+          // Cleanup if it somehow succeeded but returned error (unlikely)
+        } else {
+          diagnostics.embedding_check = { status: 'ok', message: '768-dimension vector accepted' };
+          // Cleanup
+          await supabase.from('documents').delete().eq('content', 'DIAGNOSTIC_TEST_ENTRY');
+        }
 
         diagnostics.supabase.status = 'connected';
       } catch (err: any) {

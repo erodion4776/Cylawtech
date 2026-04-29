@@ -706,16 +706,17 @@ export default function AdminSaaS() {
                           })
                         });
                         if (res.ok) {
+                          const data = await res.json();
                           setUploadDiagnostics({
                             status: 'success',
-                            message: 'Document successfully parsed and indexed.',
+                            message: data.message || 'Document indexed successfully.',
+                            details: `Result: ${JSON.stringify(data, null, 2)}`,
                             timestamp: new Date().toLocaleTimeString()
                           });
                           fetchData();
                           form.reset();
                         } else {
                           const raw = await res.text();
-                          console.log("Upload Error Raw Response:", raw);
                           let data: any = {};
                           try {
                             data = JSON.parse(raw);
@@ -726,7 +727,7 @@ export default function AdminSaaS() {
                           setUploadDiagnostics({
                             status: 'error',
                             message: data.error || 'Indexing failed',
-                            details: data.details || 'Check server logs for more info',
+                            details: data.details || JSON.stringify(data, null, 2),
                             lastStep: data.step || 'Unknown',
                             timestamp: new Date().toLocaleTimeString()
                           });

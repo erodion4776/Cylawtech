@@ -7,11 +7,15 @@ import dotenv from "dotenv";
 dotenv.config();
 
 const require = createRequire(import.meta.url);
-const pdfModule = require("pdf-parse-debugging-disabled");
-// Handle both commonjs and esm default exports
-const pdf = typeof pdfModule === 'function' ? pdfModule : pdfModule.default;
+let pdf: any;
+try {
+  const pdfModule = require("pdf-parse-debugging-disabled");
+  pdf = typeof pdfModule === 'function' ? pdfModule : pdfModule.default;
+} catch (e) {
+  console.error("Failed to load pdf-parse module:", e);
+}
 
-const ai = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || 'dummy');
+const ai = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 const supabaseUrl = process.env.SUPABASE_URL || 'https://dummy.supabase.co';
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || 'dummy';
 const supabase = createClient(supabaseUrl, supabaseKey);
@@ -61,6 +65,23 @@ export const handler: Handler = async (event) => {
   }
 
   let currentStep = "Initializing";
+  
+  if (!process.env.GEMINI_API_KEY) {
+     return { 
+       statusCode: 500, 
+       headers, 
+       body: JSON.stringify({ error: "GEMINI_API_KEY is not configured in environment variables.", step: "Config" }) 
+     };
+  }
+
+  if (!pdf) {
+    return { 
+      statusCode: 500, 
+      headers, 
+      body: JSON.stringify({ error: "PDF parser failed to initialize.", step: "Config" }) 
+    };
+  }
+
   let lastEmbedError = "";
   let lastDbError = "";
   try {
