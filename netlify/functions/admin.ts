@@ -19,15 +19,19 @@ export const handler: Handler = async (event) => {
   if (event.httpMethod === "OPTIONS") {
     return { statusCode: 204, headers, body: "" };
   }
+  
+  console.log(`Admin Request: ${event.httpMethod} ${event.path}`);
 
   const adminKey = event.headers['x-admin-key'];
   const expectedKey = process.env.ADMIN_KEY;
 
   if (!expectedKey) {
+    console.error("ADMIN_KEY environment variable is NOT SET in Netlify.");
     return { statusCode: 500, headers, body: JSON.stringify({ error: "Server misconfiguration: No admin key set" }) };
   }
 
   if (adminKey !== expectedKey) {
+    console.warn(`Unauthorized admin access attempt. Provided key: ${adminKey?.substring(0, 4)}...`);
     return { statusCode: 403, headers, body: JSON.stringify({ error: "Forbidden: Invalid Admin Key" }) };
   }
 

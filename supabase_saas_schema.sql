@@ -1,5 +1,8 @@
 -- SQL schema for LexAI SaaS Admin
--- You can run this in your Supabase SQL Editor
+-- RUN THIS IN YOUR SUPABASE SQL EDITOR
+
+-- 0. Enable Vector Extension (REQUIRED for AI features)
+CREATE EXTENSION IF NOT EXISTS vector;
 
 -- 1. Table for global system settings
 CREATE TABLE IF NOT EXISTS public.settings (
@@ -24,12 +27,22 @@ CREATE TABLE IF NOT EXISTS public.api_keys (
     created_at TIMESTAMPTZ DEFAULT now()
 );
 
--- 3. Ensure 'documents' table supports multi-site RAG
--- If your documents table already exists, verify these columns:
--- ALTER TABLE public.documents ADD COLUMN IF NOT EXISTS site TEXT;
--- ALTER TABLE public.documents ADD COLUMN IF NOT EXISTS context TEXT DEFAULT 'general';
+-- 3. Knowledge Base Documents Table
+CREATE TABLE IF NOT EXISTS public.documents (
+    id BIGSERIAL PRIMARY KEY,
+    content TEXT NOT NULL,
+    embedding vector(768),
+    site TEXT DEFAULT 'global',
+    context TEXT DEFAULT 'general',
+    metadata JSONB DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
 
--- 4. RPC for site-specific matching
+-- Add indexes for better search performance
+CREATE INDEX IF NOT EXISTS idx_documents_site ON public.documents(site);
+CREATE INDEX IF NOT EXISTS idx_documents_context ON public.documents(context);
+
+-- 4. RPC Search Function (Crucial for AI Chat)
 CREATE OR REPLACE FUNCTION match_site_documents (
   query_embedding vector(768),
   match_threshold float,
@@ -53,10 +66,12 @@ BEGIN
     d.metadata,
     1 - (d.embedding <=> query_embedding) AS similarity
   FROM documents d
-  WHERE 1 - (d.embedding <=> query_embedding) > match_threshold
-    AND (d.metadata->>'site' = p_site OR d.site = p_site) -- Handle both metadata or column
-    AND (d.metadata->>'context' = p_context OR d.context = p_context)
+  WHERE d.embedding IS NOT NULL
+    AND (d.site = p_site OR d.metadata->>'site' = p_site)
+    AND (d.context = p_context OR d.metadata->>'context' = p_context)
+    AND 1 - (d.embedding <=> query_embedding) > match_threshold
   ORDER BY d.embedding <=> query_embedding
   LIMIT match_count;
 END;
 $$;
+
