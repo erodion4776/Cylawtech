@@ -91,8 +91,14 @@ export default function AdminSaaS() {
         fetch(`${API_BASE}/keys`, { headers: { 'x-admin-key': adminKey } }),
         fetch(`${API_BASE}/documents`, { headers: { 'x-admin-key': adminKey } })
       ]);
-      if (keysRes.ok) setApiKeys(await keysRes.json());
-      if (docsRes.ok) setDocs(await docsRes.json());
+      if (keysRes.ok) {
+        const keysData = await keysRes.json();
+        setApiKeys(Array.isArray(keysData) ? keysData : []);
+      }
+      if (docsRes.ok) {
+        const docsData = await docsRes.json();
+        setDocs(Array.isArray(docsData) ? docsData : []);
+      }
     } catch (e) {
       console.error("Fetch data error", e);
     }
@@ -419,14 +425,14 @@ export default function AdminSaaS() {
             >
                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
                  {[
-                   { label: 'Total Vectors', value: docs.length, icon: Database, color: 'blue' },
-                   { label: 'Indexed Projects', value: new Set(docs.map(d => d.site)).size, icon: ExternalLink, color: 'emerald' },
-                   { label: 'Storage Usage', value: '2.4 MB', icon: FileText, color: 'purple' },
+                   { label: 'Total Vectors', value: (docs || []).length, icon: Database, colorClass: 'text-blue-500', bgClass: 'bg-blue-600/10', borderClass: 'border-blue-500/20' },
+                   { label: 'Indexed Projects', value: new Set((docs || []).map(d => d.site || 'global')).size, icon: ExternalLink, colorClass: 'text-emerald-500', bgClass: 'bg-emerald-600/10', borderClass: 'border-emerald-500/20' },
+                   { label: 'Storage Usage', value: '2.4 MB', icon: FileText, colorClass: 'text-purple-500', bgClass: 'bg-purple-600/10', borderClass: 'border-purple-500/20' },
                  ].map((stat) => (
                    <div key={stat.label} className="bg-[#0c0c0c] border border-slate-900 p-6 rounded-2xl">
                      <div className="flex justify-between items-start mb-4">
-                       <div className={`p-3 rounded-xl bg-${stat.color}-600/10 border border-${stat.color}-500/20`}>
-                         <stat.icon className={`w-5 h-5 text-${stat.color}-500`} />
+                       <div className={`p-3 rounded-xl ${stat.bgClass} border ${stat.borderClass}`}>
+                         <stat.icon className={`w-5 h-5 ${stat.colorClass}`} />
                        </div>
                        <ChevronRight className="w-4 h-4 text-slate-700" />
                      </div>
@@ -530,28 +536,36 @@ export default function AdminSaaS() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-900">
-                        {docs.map((doc) => (
-                          <tr key={doc.id} className="hover:bg-slate-900/50 group">
-                            <td className="p-4 align-top">
-                              <span className="px-2 py-1 bg-slate-950 border border-slate-800 rounded text-[10px] font-bold text-blue-400">
-                                {doc.site.toUpperCase()}
-                              </span>
-                            </td>
-                            <td className="p-4">
-                              <p className="text-xs text-slate-400 line-clamp-2 max-w-md">
-                                {doc.content}
-                              </p>
-                            </td>
-                            <td className="p-4 text-right align-middle">
-                               <button 
-                                onClick={() => handleDeleteDoc(doc.id)}
-                                className="text-slate-600 hover:text-rose-500 transition-colors opacity-0 group-hover:opacity-100"
-                               >
-                                 <Trash2 className="w-4 h-4" />
-                               </button>
+                        {(!docs || docs.length === 0) ? (
+                          <tr>
+                            <td colSpan={3} className="p-10 text-center text-slate-500">
+                              No documents found in knowledge base
                             </td>
                           </tr>
-                        ))}
+                        ) : (
+                          docs.map((doc) => (
+                            <tr key={doc.id} className="hover:bg-slate-900/50 group">
+                              <td className="p-4 align-top">
+                                <span className="px-2 py-1 bg-slate-950 border border-slate-800 rounded text-[10px] font-bold text-blue-400">
+                                  {(doc.site || 'N/A').toUpperCase()}
+                                </span>
+                              </td>
+                              <td className="p-4">
+                                <p className="text-xs text-slate-400 line-clamp-2 max-w-md">
+                                  {doc.content}
+                                </p>
+                              </td>
+                              <td className="p-4 text-right align-middle">
+                                <button 
+                                  onClick={() => handleDeleteDoc(doc.id)}
+                                  className="text-slate-600 hover:text-rose-500 transition-colors opacity-0 group-hover:opacity-100"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </td>
+                            </tr>
+                          ))
+                        )}
                       </tbody>
                     </table>
                  </div>
