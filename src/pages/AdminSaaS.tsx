@@ -551,106 +551,131 @@ export default function AdminSaaS() {
               initial={{ opacity: 0, x: 20 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -20 }}
-              className="max-w-4xl"
+              className="h-full flex flex-col"
             >
-              <div className="bg-[#0c0c0c] border border-slate-900 p-8 rounded-2xl mb-8">
-                <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
-                  <Cpu className="w-5 h-5 text-blue-500" />
-                  Live API Diagnostics
-                </h3>
-                <p className="text-slate-400 text-sm mb-8">
-                  Test your network configuration and API keys. This sends a real request to your <code className="text-blue-400 bg-blue-400/10 px-1 rounded">/api/chat</code> endpoint.
-                </p>
+              <div className="bg-[#0c0c0c] border border-slate-900 p-6 rounded-t-2xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                <div>
+                  <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                    <Cpu className="w-5 h-5 text-blue-500" />
+                    Live API Diagnostics - Interactive Chat
+                  </h3>
+                  <p className="text-slate-400 text-sm">
+                    Test your network configuration and API keys with a continuous chat session.
+                  </p>
+                </div>
+                
+                <div className="flex items-center gap-4 w-full md:w-auto">
+                  <select 
+                    id="admin-site-select"
+                    className="bg-slate-950 border border-slate-800 rounded-lg p-2 text-sm focus:border-blue-500 outline-none flex-1 md:flex-none"
+                    onChange={(e) => {
+                      const opt = e.target.options[e.target.selectedIndex];
+                      document.getElementById('admin-key-select')?.setAttribute('value', opt.dataset.key || '');
+                    }}
+                  >
+                    <option value="">Select a configured site...</option>
+                    {apiKeys.filter(k => k.status === 'active').map(k => (
+                      <option key={k.id} value={k.site} data-key={k.key}>{k.site} ({k.key.substring(0,8)}...)</option>
+                    ))}
+                  </select>
+                  <input type="hidden" id="admin-key-select" />
+                </div>
+              </div>
 
+              <div className="flex-grow bg-[#0c0c0c] border-x border-slate-900 p-6 overflow-y-auto max-h-[500px]">
+                {testResponse && testResponse.data && testResponse.data.history ? (
+                  <div className="space-y-4">
+                    {testResponse.data.history.map((msg: any, i: number) => (
+                      <div key={i} className={`flex ${msg.role === 'ai' ? 'justify-start' : 'justify-end'}`}>
+                        <div className={`p-4 rounded-xl max-w-[80%] ${msg.role === 'ai' ? 'bg-slate-900 text-white' : 'bg-blue-600 text-white'}`}>
+                          {msg.content}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="h-full flex flex-col items-center justify-center text-slate-500">
+                    <Cpu className="w-12 h-12 mb-4 opacity-50" />
+                    <p>Select a site and send a message to start diagnostic chat.</p>
+                  </div>
+                )}
+              </div>
+
+              <div className="bg-[#0c0c0c] border border-slate-900 p-4 rounded-b-2xl">
                 <form 
-                  onSubmit={(e) => {
+                  onSubmit={async (e) => {
                     e.preventDefault();
                     const f = e.target as HTMLFormElement;
-                    const site = (f.elements.namedItem('site') as HTMLSelectElement).value;
-                    const key = (f.elements.namedItem('key') as HTMLSelectElement).value;
-                    const msg = (f.elements.namedItem('message') as HTMLTextAreaElement).value;
-                    handleRunAiTest(site, key, msg);
+                    const siteSel = document.getElementById('admin-site-select') as HTMLSelectElement;
+                    const keyVal = document.getElementById('admin-key-select')?.getAttribute('value');
+                    const msgInput = f.elements.namedItem('message') as HTMLInputElement;
+                    
+                    if (!siteSel.value || !keyVal) return alert('Select a site first.');
+                    if (!msgInput.value) return;
+                    
+                    // Add requested message to UI optimistically
+                    const userMsg = msgInput.value;
+                    msgInput.value = '';
+                    setTestResponse((prev: any) => ({
+                      status: 200,
+                      data: {
+                        history: [...(prev?.data?.history || []), { role: 'user', content: userMsg }]
+                      }
+                    }));
+                    
+                    setTestLoading(true);
+                    try {
+                      const res = await fetch('/api/chat', {
+                        method: 'POST',
+                        headers: {
+                          'Content-Type': 'application/json',
+                          'x-api-key': keyVal
+                        },
+                        body: JSON.stringify({
+                          message: userMsg,
+                          site: siteSel.value,
+                          jurisdiction: 'general'
+                        })
+                      });
+                      
+                      const data = await res.json();
+                      setTestResponse((prev: any) => ({
+                        status: res.status,
+                        data: {
+                          ...data,
+                          history: [...(prev?.data?.history || []), { role: 'ai', content: data.response || data.error }]
+                        }
+                      }));
+                    } catch (err: any) {
+                      setTestResponse((prev: any) => ({
+                        status: 500,
+                        data: {
+                          history: [...(prev?.data?.history || []), { role: 'ai', content: `Error: ${err.message}` }]
+                        }
+                      }));
+                    } finally {
+                      setTestLoading(false);
+                    }
                   }}
-                  className="space-y-6"
+                  className="flex gap-4"
                 >
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div>
-                      <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">1. Select Target Site</label>
-                      <select name="site" required className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm focus:border-blue-500 outline-none">
-                        <option value="">Select a configured site...</option>
-                        {Array.from(new Set(apiKeys.map(k => k.site))).map(site => (
-                          <option key={site} value={site}>{site}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">2. Select API Key</label>
-                      <select name="key" required className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm focus:border-blue-500 outline-none">
-                        <option value="">Select an active key...</option>
-                        {apiKeys.filter(k => k.status === 'active').map(k => (
-                          <option key={k.id} value={k.key}>{k.site} - {k.key.substring(0, 10)}...</option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">3. Test Message</label>
-                    <textarea 
-                      name="message"
-                      rows={3}
-                      placeholder="e.g. Hello, who are you?"
-                      required
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-sm focus:border-blue-500 outline-none resize-none"
-                    />
-                  </div>
-
+                  <input 
+                    name="message"
+                    type="text"
+                    placeholder="Type diagnostic message..."
+                    autoComplete="off"
+                    disabled={testLoading}
+                    className="flex-grow bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm focus:border-blue-500 outline-none text-white disabled:opacity-50"
+                  />
                   <button 
                     disabled={testLoading}
-                    className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 rounded-xl shadow-lg transition-all active:scale-[0.98] disabled:opacity-50"
+                    type="submit"
+                    className="bg-blue-600 hover:bg-blue-500 text-white font-bold px-6 rounded-xl transition-all disabled:opacity-50"
                   >
-                    {testLoading ? "RUNNING NETWORK DIAGNOSTICS..." : "EXECUTE TEST REQUEST"}
+                    {testLoading ? "..." : "SEND"}
                   </button>
                 </form>
               </div>
-
-              {testResponse && (
-                <motion.div 
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="bg-[#0c0c0c] border border-slate-900 rounded-2xl overflow-hidden shadow-2xl"
-                >
-                  <div className={`p-4 flex items-center justify-between border-b border-slate-900 ${
-                    testResponse.status === 200 ? 'bg-emerald-500/5' : 'bg-rose-500/5'
-                  }`}>
-                    <div className="flex items-center gap-3">
-                      <div className={`w-3 h-3 rounded-full ${testResponse.status === 200 ? 'bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]' : 'bg-rose-500'}`}></div>
-                      <span className="font-bold text-sm text-white">HTTP RESPONSE: {testResponse.status}</span>
-                    </div>
-                    {testResponse.status === 200 ? (
-                      <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                    ) : (
-                      <AlertCircle className="w-4 h-4 text-rose-500" />
-                    )}
-                  </div>
-                  <div className="p-6 font-mono text-xs overflow-x-auto">
-                    {testResponse.data.report ? (
-                      <div className="mb-4 space-y-2">
-                        <div className="text-amber-500 font-bold mb-2">Diagnostic Fallback Report:</div>
-                        {testResponse.data.report.map((line: string, i: number) => (
-                          <div key={i} className="text-slate-400 bg-slate-900 p-2 rounded flex items-center gap-2">
-                            <span className="w-1.5 h-1.5 rounded-full bg-slate-700"></span>
-                            {line}
-                          </div>
-                        ))}
-                      </div>
-                    ) : null}
-                    <pre className="text-slate-300">
-                      {JSON.stringify(testResponse.data, null, 2)}
-                    </pre>
-                  </div>
-                </motion.div>
-              )}
             </motion.div>
           )}
 
