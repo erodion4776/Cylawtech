@@ -370,6 +370,28 @@ export default function AdminSaaS() {
                     </div>
                   ))}
                 </div>
+
+                <div className="mt-8 border-t border-slate-900 pt-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <h4 className="text-sm font-bold text-slate-400 uppercase tracking-widest">Database Health Check</h4>
+                    <button 
+                      onClick={async () => {
+                        try {
+                          const res = await fetch(`${API_BASE}/test-db`, {
+                            headers: { 'x-admin-key': adminKey }
+                          });
+                          const data = await res.json();
+                          alert(`DB Check: ${JSON.stringify(data, null, 2)}`);
+                        } catch (e: any) {
+                          alert(`DB Check failed: ${e.message}`);
+                        }
+                      }}
+                      className="text-[10px] font-bold bg-slate-900 hover:bg-slate-800 text-slate-400 px-3 py-1 rounded-lg border border-slate-800 transition-colors"
+                    >
+                      RUN CONNECTIVITY TEST
+                    </button>
+                  </div>
+                </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">

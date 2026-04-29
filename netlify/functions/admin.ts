@@ -113,6 +113,38 @@ export const handler: Handler = async (event) => {
       return { statusCode: 200, headers, body: JSON.stringify({ message: "Document deleted" }) };
     }
 
+    // GET test-db
+    if (method === 'GET' && path === 'test-db') {
+      const diagnostics: any = {
+        supabase: {
+          url: supabaseUrl.replace(/\/\/[^:]+:[^@]+@/, '//***:***@'), // mask potential secrets
+          status: 'unknown'
+        },
+        tables: {}
+      };
+
+      try {
+        // Check documents table
+        const { data: docData, error: docError } = await supabase.from('documents').select('count', { count: 'exact', head: true });
+        diagnostics.tables.documents = docError ? { status: 'error', error: docError } : { status: 'ok', count: docData };
+        
+        // Check api_keys table
+        const { data: keyData, error: keyError } = await supabase.from('api_keys').select('count', { count: 'exact', head: true });
+        diagnostics.tables.api_keys = keyError ? { status: 'error', error: keyError } : { status: 'ok', count: keyData };
+
+        // Check settings table
+        const { data: setData, error: setError } = await supabase.from('settings').select('count', { count: 'exact', head: true });
+        diagnostics.tables.settings = setError ? { status: 'error', error: setError } : { status: 'ok', count: setData };
+
+        diagnostics.supabase.status = 'connected';
+      } catch (err: any) {
+        diagnostics.supabase.status = 'failed';
+        diagnostics.supabase.error = err.message;
+      }
+
+      return { statusCode: 200, headers, body: JSON.stringify(diagnostics) };
+    }
+
     return { statusCode: 404, headers, body: JSON.stringify({ error: "Endpoint not found", path }) };
   } catch (error: any) {
     console.error("Admin Function Error:", error);

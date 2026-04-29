@@ -137,7 +137,12 @@ export const handler: Handler = async (event) => {
           if (error) {
             console.error(`Supabase Insert Error (Dimension: ${embedding.length}):`, error);
             dbErrorCount++;
-            lastDbError = `${error.message} (Vector Size: ${embedding.length})` || JSON.stringify(error);
+            let errorMsg = error.message;
+            if (error.code === '42P01') errorMsg = "Table 'documents' does not exist in Supabase.";
+            if (error.code === '23505') errorMsg = "Duplicate content detected.";
+            if (error.code === '42703') errorMsg = "Missing column in Supabase (check if 'embedding' column exists).";
+            
+            lastDbError = `${errorMsg} (HINT: ${error.hint || 'None'}) (Code: ${error.code})` || JSON.stringify(error);
           } else {
             processedCount++;
           }
