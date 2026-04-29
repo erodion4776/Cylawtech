@@ -2,9 +2,14 @@ import { Handler } from '@netlify/functions';
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { createClient } from "@supabase/supabase-js";
 import { createRequire } from 'module';
+import dotenv from "dotenv";
+
+dotenv.config();
 
 const require = createRequire(import.meta.url);
-const pdf = require("pdf-parse-debugging-disabled");
+const pdfModule = require("pdf-parse-debugging-disabled");
+// Handle both commonjs and esm default exports
+const pdf = typeof pdfModule === 'function' ? pdfModule : pdfModule.default;
 
 const ai = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || 'dummy');
 const supabaseUrl = process.env.SUPABASE_URL || 'https://dummy.supabase.co';
@@ -41,10 +46,18 @@ export const handler: Handler = async (event) => {
     return { statusCode: 405, headers, body: 'Method Not Allowed' };
   }
 
-  const adminKey = event.headers['x-admin-key'];
+  const adminKey = event.headers['x-admin-key'] || event.headers['X-Admin-Key'];
   if (!adminKey || adminKey !== process.env.ADMIN_KEY) {
-    console.error("Unauthorized attempt to access embed endpoint");
-    return { statusCode: 403, headers, body: JSON.stringify({ error: "Forbidden: Invalid Admin Key" }) };
+    console.error("Unauthorized attempt to access embed endpoint. Expected key present:", !!process.env.ADMIN_KEY);
+    return { 
+      statusCode: 403, 
+      headers, 
+      body: JSON.stringify({ 
+        error: "Forbidden: Invalid or missing Admin Key",
+        step: "Authorization",
+        details: !process.env.ADMIN_KEY ? "Server-side ADMIN_KEY is not configured." : "The provided master key did not match."
+      }) 
+    };
   }
 
   let currentStep = "Initializing";
@@ -152,8 +165,11 @@ export const handler: Handler = async (event) => {
         statusCode: 500,
         headers,
         body: JSON.stringify({ 
-          error: finalMessage,
-          details: lastEmbedError || lastDbError
+          error: "Indexing failed completely",
+          details: finalMessage,
+          step: "Processing Loop",
+          lastEmbedError,
+          lastDbError
         })
       };
     }

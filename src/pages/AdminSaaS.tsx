@@ -692,7 +692,15 @@ export default function AdminSaaS() {
                           fetchData();
                           form.reset();
                         } else {
-                          const data = await res.json();
+                          const raw = await res.text();
+                          console.log("Upload Error Raw Response:", raw);
+                          let data: any = {};
+                          try {
+                            data = JSON.parse(raw);
+                          } catch (e) {
+                            data = { error: "Non-JSON Response", details: raw };
+                          }
+                          
                           setUploadDiagnostics({
                             status: 'error',
                             message: data.error || 'Indexing failed',
