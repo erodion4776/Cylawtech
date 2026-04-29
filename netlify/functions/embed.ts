@@ -1,5 +1,5 @@
 import { Handler } from '@netlify/functions';
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenAI } from "@google/genai";
 import { createClient } from "@supabase/supabase-js";
 import pdfParser from "pdf-parse-debugging-disabled";
 import dotenv from "dotenv";
@@ -11,21 +11,21 @@ let pdf: any = pdfParser;
 if (typeof pdf !== 'function' && pdf && typeof (pdf as any).default === 'function') {
   pdf = (pdf as any).default;
 }
-if (typeof pdf !== 'function' && pdf && typeof (pdf as any).pdf === 'function') {
-  pdf = (pdf as any).pdf;
-}
 
-const ai = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
 const supabaseUrl = process.env.SUPABASE_URL || 'https://dummy.supabase.co';
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || 'dummy';
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 async function getEmbedding(text: string) {
   try {
-    const model = ai.getGenerativeModel({ model: "text-embedding-004" });
-    const result = await model.embedContent(text);
-    if (result.embedding && result.embedding.values) {
-      return result.embedding.values;
+    const result = await ai.models.embedContent({
+      model: 'text-embedding-004',
+      contents: [{ parts: [{ text }] }]
+    });
+    
+    if (result.embeddings && result.embeddings.length > 0) {
+      return result.embeddings[0].values;
     }
     return null;
   } catch (error: any) {

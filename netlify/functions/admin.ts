@@ -1,6 +1,6 @@
 import { Handler } from '@netlify/functions';
 import { createClient } from "@supabase/supabase-js";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenAI } from "@google/genai";
 import pdfParser from "pdf-parse-debugging-disabled";
 import dotenv from "dotenv";
 
@@ -9,6 +9,8 @@ dotenv.config();
 const supabaseUrl = process.env.SUPABASE_URL || 'https://dummy.supabase.co';
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || 'dummy';
 const supabase = createClient(supabaseUrl, supabaseKey);
+
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
 
 export const handler: Handler = async (event) => {
   const headers = {
@@ -165,11 +167,13 @@ export const handler: Handler = async (event) => {
 
         // Test Gemini Embedding
         try {
-          const aiModel = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
-          const model = aiModel.getGenerativeModel({ model: "text-embedding-004" });
-          const res = await model.embedContent("Diagnostic test");
-          if (res.embedding) {
-            diagnostics.gemini = { status: 'ok', dimension: res.embedding.values.length };
+          const aiModel = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
+          const res = await aiModel.models.embedContent({
+            model: 'text-embedding-004',
+            contents: [{ parts: [{ text: "Diagnostic test" }] }]
+          });
+          if (res.embeddings && res.embeddings.length > 0) {
+            diagnostics.gemini = { status: 'ok', dimension: res.embeddings[0].values.length };
           } else {
             diagnostics.gemini = { status: 'error', error: 'No embedding returned' };
           }

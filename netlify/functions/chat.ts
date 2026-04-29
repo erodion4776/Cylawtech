@@ -1,12 +1,12 @@
 import { Handler } from '@netlify/functions';
 import Groq from "groq-sdk";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenAI } from "@google/genai";
 import { HfInference } from "@huggingface/inference";
 import { createClient } from "@supabase/supabase-js";
 
 // Initialize AI Clients
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY || 'dummy' });
-const ai = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || 'dummy');
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
 const hf = new HfInference(process.env.HF_TOKEN || 'dummy');
 
 // Initialize Supabase
@@ -23,12 +23,14 @@ console.log("LexAI Chat Function Initialized", {
 async function getEmbedding(text: string) {
   try {
     console.log(`Generating embedding for text: ${text.substring(0, 50)}...`);
-    const model = ai.getGenerativeModel({ model: "text-embedding-004" });
-    const result = await model.embedContent(text);
+    const result = await ai.models.embedContent({
+      model: "text-embedding-004",
+      contents: [{ parts: [{ text }] }]
+    });
     
-    if (result.embedding && result.embedding.values) {
+    if (result.embeddings && result.embeddings.length > 0) {
       console.log("Embedding generated successfully.");
-      return result.embedding.values;
+      return result.embeddings[0].values;
     }
     console.error("No embeddings found in result.");
     return null;
@@ -186,9 +188,11 @@ ${message}
       }
       try {
         console.log(`Attempting Gemini (${modelName})...`);
-        const model = ai.getGenerativeModel({ model: modelName || 'gemini-1.5-flash' });
-        const result = await model.generateContent(systemPrompt + "\n\nUser: " + message);
-        return result.response.text();
+        const result = await ai.models.generateContent({
+          model: modelName || 'gemini-3-flash-preview',
+          contents: systemPrompt + "\n\nUser: " + message
+        });
+        return result.text;
       } catch (e: any) {
         report.push(`Gemini (${modelName}): ${e.message}`);
         console.warn(`Gemini (${modelName}) failed:`, e.message);
