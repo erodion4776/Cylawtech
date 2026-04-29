@@ -23,12 +23,14 @@ console.log("LexAI Chat Function Initialized", {
 async function getEmbedding(text: string) {
   try {
     console.log(`Generating embedding for text: ${text.substring(0, 50)}...`);
-    const model = ai.getGenerativeModel({ model: "text-embedding-004" });
-    const result = await model.embedContent(text);
+    const result = await ai.models.embedContent({
+      model: "gemini-embedding-2-preview",
+      contents: text
+    });
     
-    if (result.embedding && result.embedding.values) {
+    if (result.embeddings && result.embeddings.length > 0) {
       console.log("Embedding generated successfully.");
-      return result.embedding.values;
+      return result.embeddings[0].values;
     }
     console.error("No embeddings found in result.");
     return null;
@@ -140,86 +142,110 @@ export const handler: Handler = async (event) => {
     // Tier 2: Groq Fallback
     // Tier 3: Hugging Face Fallback
 
+    const report: string[] = [];
+
     const tryGemini = async (model: string) => {
-      console.log(`Attempting Gemini (${model})...`);
-      const genModel = ai.getGenerativeModel({ model: model || 'gemini-1.5-flash' });
-      const result = await genModel.generateContent(systemPrompt + "\n\nUser: " + message);
-      return result.response.text();
+      if (!process.env.GEMINI_API_KEY) {
+        report.push(`Gemini (${model}): Missing GEMINI_API_KEY`);
+        return null;
+      }
+      try {
+        console.log(`Attempting Gemini (${model})...`);
+        const result = await ai.models.generateContent({
+          model: model || 'gemini-3-flash-preview',
+          contents: systemPrompt + "\n\nUser: " + message
+        });
+        return result.text;
+      } catch (e: any) {
+        report.push(`Gemini (${model}): ${e.message}`);
+        console.warn(`Gemini (${model}) failed:`, e.message);
+        return null;
+      }
     };
 
     const tryGroq = async () => {
-      if (!process.env.GROQ_API_KEY || process.env.GROQ_API_KEY === 'dummy') return null;
-      console.log("Attempting Groq (mixtral-8x7b-32768)...");
-      const completion = await groq.chat.completions.create({
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: message }
-        ],
-        model: "mixtral-8x7b-32768",
-      });
-      return completion.choices[0]?.message?.content || null;
+      if (!process.env.GROQ_API_KEY || process.env.GROQ_API_KEY === 'dummy') {
+        report.push("Groq: Missing GROQ_API_KEY");
+        return null;
+      }
+      try {
+        console.log("Attempting Groq (mixtral-8x7b-32768)...");
+        const completion = await groq.chat.completions.create({
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: message }
+          ],
+          model: "mixtral-8x7b-32768",
+        });
+        return completion.choices[0]?.message?.content || null;
+      } catch (e: any) {
+        report.push(`Groq: ${e.message}`);
+        console.warn("Groq failed:", e.message);
+        return null;
+      }
     };
 
     const tryHuggingFace = async () => {
-      if (!process.env.HF_TOKEN || process.env.HF_TOKEN === 'dummy') return null;
-      console.log("Attempting Hugging Face (Mistral-7B-Instruct-v0.2)...");
-      const result = await hf.textGeneration({
-        model: 'mistralai/Mistral-7B-Instruct-v0.2',
-        inputs: `<s>[INST] ${systemPrompt} \n\n User Message: ${message} [/INST]`,
-        parameters: { max_new_tokens: 1000 }
-      });
-      let text = result.generated_text || "";
-      if (text.includes('[/INST]')) {
-        text = text.split('[/INST]').pop()?.trim() || text;
+      if (!process.env.HF_TOKEN || process.env.HF_TOKEN === 'dummy') {
+        report.push("Hugging Face: Missing HF_TOKEN");
+        return null;
       }
-      return text;
+      try {
+        console.log("Attempting Hugging Face (Mistral-7B-Instruct-v0.2)...");
+        const result = await hf.textGeneration({
+          model: 'mistralai/Mistral-7B-Instruct-v0.2',
+          inputs: `<s>[INST] ${systemPrompt} \n\n User Message: ${message} [/INST]`,
+          parameters: { max_new_tokens: 1000 }
+        });
+        let text = result.generated_text || "";
+        if (text.includes('[/INST]')) {
+          text = text.split('[/INST]').pop()?.trim() || text;
+        }
+        return text;
+      } catch (e: any) {
+        report.push(`Hugging Face: ${e.message}`);
+        console.warn("Hugging Face failed:", e.message);
+        return null;
+      }
     };
 
     try {
-      // 1. Primary Attempt (Usually Gemini or specific Groq model)
-      try {
-        if (activeModel.includes('groq')) {
-          responseText = await tryGroq() || "";
-        } else {
-          responseText = await tryGemini(activeModel) || "";
-        }
-      } catch (e: any) {
-        console.warn("Primary AI Tier failed:", e.message);
+      // 1. Primary Attempt
+      if (activeModel.includes('groq')) {
+        responseText = await tryGroq() || "";
+      } else {
+        responseText = await tryGemini(activeModel) || "";
       }
 
-      // 2. Secondary Attempt (Gemini Flash if primary was something else/failed)
-      if (!responseText) {
-        try {
-          responseText = await tryGemini('gemini-1.5-flash');
-        } catch (e: any) {
-          console.warn("Secondary AI Tier (Gemini Flash) failed:", e.message);
-        }
+      // 2. Secondary Attempt (Gemini Flash)
+      if (!responseText && activeModel !== 'gemini-3-flash-preview') {
+        responseText = await tryGemini('gemini-3-flash-preview') || "";
       }
 
-      // 3. Tertiary Attempt (Groq)
-      if (!responseText) {
-        try {
-          responseText = await tryGroq() || "";
-        } catch (e: any) {
-          console.warn("Tertiary AI Tier (Groq) failed:", e.message);
-        }
+      // 3. Tertiary Attempt (Groq fallback if not primary)
+      if (!responseText && !activeModel.includes('groq')) {
+        responseText = await tryGroq() || "";
       }
 
       // 4. Quaternary Attempt (Hugging Face)
       if (!responseText) {
-        try {
-          responseText = await tryHuggingFace() || "";
-        } catch (e: any) {
-          console.warn("Quaternary AI Tier (Hugging Face) failed:", e.message);
-        }
+        responseText = await tryHuggingFace() || "";
       }
 
     } catch (criticalError: any) {
       console.error("Critical Failure in AI Fallback Chain:", criticalError);
+      report.push(`Critical Chain Error: ${criticalError.message}`);
     }
 
     if (!responseText) {
-       throw new Error("All AI providers are currently unavailable. Our engineers have been notified.");
+       return {
+         statusCode: 500,
+         headers,
+         body: JSON.stringify({
+           error: "All AI providers failed. Check your API keys in Netlify.",
+           report: report
+         })
+       };
     }
 
     return {

@@ -594,6 +594,17 @@ export default function AdminSaaS() {
                     )}
                   </div>
                   <div className="p-6 font-mono text-xs overflow-x-auto">
+                    {testResponse.data.report ? (
+                      <div className="mb-4 space-y-2">
+                        <div className="text-amber-500 font-bold mb-2">Diagnostic Fallback Report:</div>
+                        {testResponse.data.report.map((line: string, i: number) => (
+                          <div key={i} className="text-slate-400 bg-slate-900 p-2 rounded flex items-center gap-2">
+                            <span className="w-1.5 h-1.5 rounded-full bg-slate-700"></span>
+                            {line}
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
                     <pre className="text-slate-300">
                       {JSON.stringify(testResponse.data, null, 2)}
                     </pre>

@@ -12,10 +12,12 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 
 async function getEmbedding(text: string) {
   try {
-    const model = ai.getGenerativeModel({ model: "text-embedding-004" });
-    const result = await model.embedContent(text);
-    if (result.embedding && result.embedding.values) {
-      return result.embedding.values;
+    const result = await ai.models.embedContent({
+      model: "gemini-embedding-2-preview",
+      contents: text
+    });
+    if (result.embeddings && result.embeddings.length > 0) {
+      return result.embeddings[0].values;
     }
     return null;
   } catch (error: any) {

@@ -26,13 +26,15 @@ export const handler: Handler = async (event) => {
     Scenario: ${scenario}
     User Response: ${userResponse}`;
 
-    const model = ai.getGenerativeModel({ model: 'gemini-1.5-pro' });
-    const result = await model.generateContent(systemPrompt);
+    const result = await ai.models.generateContent({
+      model: 'gemini-3-flash-preview',
+      contents: systemPrompt
+    });
 
     return {
       statusCode: 200,
       headers,
-      body: JSON.stringify({ feedback: result.response.text() })
+      body: JSON.stringify({ feedback: result.text })
     };
   } catch (error) {
     console.error("Grading API Error:", error);
