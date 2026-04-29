@@ -40,7 +40,7 @@ const BackgroundMotion = () => (
 );
 
 const Home = () => {
-  useDocumentTitle('LexAI - Professional Legal Intelligence by CyAzor Tech');
+  useDocumentTitle('LexAI - Professional Legal Intelligence');
 
   const containerVariants: Variants = {
     hidden: { opacity: 0 },
@@ -91,7 +91,6 @@ const Home = () => {
             className="text-xl md:text-2xl text-slate-600 mb-12 max-w-2xl mx-auto lg:mx-0 leading-relaxed font-medium"
           >
             Experience the power of LexAI, the industry-leading workstation for legal professionals. 
-            Powered by <Link to="/about" className="text-slate-900 font-bold border-b-2 border-slate-900 hover:text-blue-600 hover:border-blue-600 transition-all">CyAzor Tech</Link>, 
             we bridge the gap between complex law and seamless technology.
           </motion.p>
           <motion.div 
@@ -182,7 +181,7 @@ const Home = () => {
                 Built for the <br /> <span className="text-blue-500 underline underline-offset-8">Law of Tomorrow.</span>
               </h2>
               <p className="text-xl text-slate-400 mb-12 leading-relaxed">
-                CyAzor Tech introduces LexAI, a revolutionary legal intelligence platform engineered to augment the capabilities of legal researchers, advocates, and solicitors.
+                LexAI is a revolutionary legal intelligence platform engineered to augment the capabilities of legal researchers, advocates, and solicitors.
               </p>
               <div className="grid grid-cols-2 gap-8">
                 <div>

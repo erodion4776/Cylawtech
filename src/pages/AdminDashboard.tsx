@@ -4,7 +4,7 @@ import { Shield, Upload, Settings, Database, DollarSign, Loader2, CheckCircle2 }
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 
 const AdminDashboard = () => {
-  useDocumentTitle('CyAzor - Admin Dashboard');
+  useDocumentTitle('LexAI - Admin Dashboard');
   const [activeTab, setActiveTab] = useState('resources');
   const [isProcessing, setIsProcessing] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<string | null>(null);

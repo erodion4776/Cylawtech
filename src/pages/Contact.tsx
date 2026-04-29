@@ -4,7 +4,7 @@ import { Mail, MessageSquare, Send, CheckCircle2, Loader2 } from 'lucide-react';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 
 const Contact = () => {
-  useDocumentTitle('CyAzor - Contact');
+  useDocumentTitle('LexAI - Contact');
 
   const [formData, setFormData] = useState({
     email: '',
@@ -60,7 +60,7 @@ const Contact = () => {
               <motion.div whileHover={{ scale: 1.2, rotate: 10 }} className="w-12 h-12 bg-blue-50 rounded-2xl flex items-center justify-center text-blue-600 shadow-sm">
                 <Mail size={20} />
               </motion.div>
-              <span className="text-slate-600 font-medium group-hover:text-blue-600 transition-colors">contact@cyazor.com</span>
+              <span className="text-slate-600 font-medium group-hover:text-blue-600 transition-colors">contact@lexai.pro</span>
             </div>
             <div className="flex items-center gap-4 group cursor-pointer">
               <motion.div whileHover={{ scale: 1.2, rotate: -10 }} className="w-12 h-12 bg-indigo-50 rounded-2xl flex items-center justify-center text-indigo-600 shadow-sm">

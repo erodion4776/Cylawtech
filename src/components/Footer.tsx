@@ -25,11 +25,11 @@ const Footer = () => {
               </motion.div>
               <div className="flex flex-col">
                 <span className="font-bold text-xl tracking-tight text-slate-900 leading-none">LexAI</span>
-                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest leading-none">by CyAzor Tech</span>
+                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest leading-none">Workspace</span>
               </div>
             </Link>
             <p className="text-slate-500 text-sm leading-relaxed">
-              Empowering legal minds with professional legal intelligence. Powered by CyAzor Tech.
+              Empowering legal minds with professional legal intelligence.
             </p>
             <div className="flex gap-4 mt-6">
               {[
@@ -79,8 +79,7 @@ const Footer = () => {
 
         <div className="border-t border-slate-200 pt-8 flex flex-col md:flex-row justify-between items-center gap-4">
           <p className="text-slate-400 text-xs text-center md:text-left leading-relaxed">
-            © {new Date().getFullYear()} CyAzor Tech. All rights reserved.<br/>
-            LexAI is a trademark of CyAzor Tech.
+            © {new Date().getFullYear()} LexAI Workspace. All rights reserved.<br/>
           </p>
           <div className="flex items-center gap-2 text-slate-400 text-xs">
             <Mail size={14} />

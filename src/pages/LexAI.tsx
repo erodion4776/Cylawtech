@@ -167,7 +167,7 @@ const LexAI = () => {
             </div>
             <div className="flex flex-col">
               <span className="font-black text-slate-900 tracking-tighter">LexAI Workspace</span>
-              <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">Powered by CyAzor Tech</span>
+              <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">Professional Legal Intelligence</span>
             </div>
           </div>
           

@@ -4,7 +4,7 @@ import { Users, Target, Scale, Brain, Globe, TrendingUp, Zap, Sparkles } from 'l
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 
 const About = () => {
-  useDocumentTitle('LexAI - Powered by CyAzor Tech');
+  useDocumentTitle('LexAI - About');
 
   const values = [
     {
@@ -43,8 +43,8 @@ const About = () => {
               The Mind Behind <span className="text-blue-600 underline underline-offset-8">LexAI</span>
             </h1>
             <p className="text-xl text-slate-600 mb-8 leading-relaxed font-medium">
-              LexAI is the flagship product of **CyAzor Tech**, a pioneer in the intersection of digital growth and legal methodology. 
-              Founded by Attorney Cynthia Azor, our goal is to eliminate the friction in legal practice through intelligent automation.
+              LexAI is a pioneer in the intersection of digital growth and legal methodology. 
+              Our goal is to eliminate the friction in legal practice through intelligent automation.
             </p>
             <div className="space-y-6 text-lg text-slate-500 leading-relaxed">
               <p>

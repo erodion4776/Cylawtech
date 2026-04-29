@@ -7,11 +7,11 @@ const Legal = () => {
   const content: Record<string, { title: string; body: string }> = {
     'privacy': {
       title: 'Privacy Policy',
-      body: 'This Privacy Policy describes how CyAzor Tech ("LexAI") collects, uses, and shares your personal information when you use our website and services. We are committed to protecting your privacy and ensuring that your personal data is handled securely and in accordance with applicable laws.'
+      body: 'This Privacy Policy describes how LexAI collects, uses, and shares your personal information when you use our website and services. We are committed to protecting your privacy and ensuring that your personal data is handled securely and in accordance with applicable laws.'
     },
     'disclaimer': {
       title: 'Disclaimer',
-      body: 'The information provided on this website is for general informational purposes only and does not constitute legal advice. CyAzor Tech is not a law firm and does not provide legal representation. Use of the LexAI platform does not create an attorney-client relationship.'
+      body: 'The information provided on this website is for general informational purposes only and does not constitute legal advice. LexAI is not a law firm and does not provide legal representation. Use of the LexAI platform does not create an attorney-client relationship.'
     },
     'affiliate-disclosure': {
       title: 'Affiliate Disclosure',

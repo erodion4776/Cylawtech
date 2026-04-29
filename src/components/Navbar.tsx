@@ -41,7 +41,7 @@ const Navbar = () => {
           </motion.div>
           <div className="flex flex-col">
             <span className="font-bold text-xl tracking-tight text-slate-900 leading-none">LexAI</span>
-            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest leading-none">by CyAzor Tech</span>
+            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest leading-none">Workspace</span>
           </div>
         </Link>
 

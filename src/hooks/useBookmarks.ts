@@ -4,7 +4,7 @@ export const useBookmarks = () => {
   const [bookmarks, setBookmarks] = useState<string[]>([]);
 
   useEffect(() => {
-    const saved = localStorage.getItem('cyazor_bookmarks');
+    const saved = localStorage.getItem('lexai_bookmarks');
     if (saved) {
       setBookmarks(JSON.parse(saved));
     }
@@ -16,7 +16,7 @@ export const useBookmarks = () => {
       : [...bookmarks, id];
     
     setBookmarks(newBookmarks);
-    localStorage.setItem('cyazor_bookmarks', JSON.stringify(newBookmarks));
+    localStorage.setItem('lexai_bookmarks', JSON.stringify(newBookmarks));
   };
 
   const isBookmarked = (id: string) => bookmarks.includes(id);

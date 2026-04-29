@@ -179,7 +179,7 @@ const LexAIStandalone = () => {
             </button>
           </div>
           <div className="flex justify-between items-center px-2 mt-3">
-            <p className="text-[9px] text-[#64748B] font-medium tracking-wider">CYAZOR STRATEGY ENGINE</p>
+            <p className="text-[9px] text-[#64748B] font-medium tracking-wider">LEXAI STRATEGY ENGINE</p>
             <div className="flex gap-3 text-[9px] text-[#64748B]">
               <span className="cursor-help opacity-50 hover:opacity-100 transition-opacity uppercase">Privileged</span>
               <span className="cursor-help opacity-50 hover:opacity-100 transition-opacity uppercase">Confidential</span>
