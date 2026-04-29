@@ -20,7 +20,18 @@ export const handler: Handler = async (event) => {
     return { statusCode: 403, body: JSON.stringify({ error: "Forbidden: Invalid Admin Key" }) };
   }
 
-  const path = event.path.replace(/\.netlify\/functions\/admin\/?/, '').replace(/\/api\/admin\/?/, '');
+  const fullPath = event.path;
+  // Extract the part after /admin/
+  let path = '';
+  if (fullPath.includes('/admin/')) {
+    path = fullPath.split('/admin/')[1] || '';
+  } else if (fullPath.endsWith('/admin')) {
+    path = '';
+  }
+  
+  // Remove trailing slashes and clean up
+  path = path.replace(/\/$/, '');
+  
   const method = event.httpMethod;
 
   try {

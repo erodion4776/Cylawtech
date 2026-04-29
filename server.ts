@@ -40,8 +40,8 @@ async function startServer() {
   );
 
   // Modular Routes
-  app.use("/api", chatRoutes);
   app.use("/api/admin", adminRoutes);
+  app.use("/api", chatRoutes);
   
   // Backward compatibility for existing UI
   // Note: the new modular /chat requires an API key. 
