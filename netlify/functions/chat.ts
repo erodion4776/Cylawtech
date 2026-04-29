@@ -21,23 +21,41 @@ console.log("LexAI Chat Function Initialized", {
 });
 
 async function getEmbedding(text: string) {
-  try {
-    console.log(`Generating embedding for text: ${text.substring(0, 50)}...`);
-    const result = await ai.models.embedContent({
-      model: "text-embedding-004",
-      contents: [{ parts: [{ text }] }]
-    });
-    
-    if (result.embeddings && result.embeddings.length > 0) {
-      console.log("Embedding generated successfully.");
-      return result.embeddings[0].values;
+  // Try Gemini First
+  if (process.env.GEMINI_API_KEY) {
+    try {
+      console.log(`Generating embedding for text: ${text.substring(0, 50)}...`);
+      const result = await ai.models.embedContent({
+        model: "text-embedding-004",
+        contents: [{ parts: [{ text }] }]
+      });
+      
+      if (result.embeddings && result.embeddings.length > 0) {
+        console.log("Gemini embedding generated successfully.");
+        return result.embeddings[0].values;
+      }
+    } catch (gemError: any) {
+      console.warn("Gemini Embedding (Chat) failed, trying fallback:", gemError.message);
     }
-    console.error("No embeddings found in result.");
-    return null;
-  } catch (error) {
-    console.error("Embedding generation error in chat.ts:", error);
-    return null;
   }
+
+  // Fallback to Hugging Face
+  if (process.env.HF_TOKEN) {
+    try {
+      const result = await hf.featureExtraction({
+        model: "sentence-transformers/all-MiniLM-L6-v2",
+        inputs: text,
+      });
+      if (Array.isArray(result)) {
+        console.log("Hugging Face embedding generated successfully as fallback.");
+        return result as number[];
+      }
+    } catch (hfError: any) {
+      console.error("Hugging Face Embedding (Chat) also failed:", hfError.message);
+    }
+  }
+
+  return null;
 }
 
 export const handler: Handler = async (event) => {

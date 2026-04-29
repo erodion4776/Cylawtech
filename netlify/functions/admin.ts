@@ -1,6 +1,7 @@
 import { Handler } from '@netlify/functions';
 import { createClient } from "@supabase/supabase-js";
 import { GoogleGenAI } from "@google/genai";
+import { HfInference } from "@huggingface/inference";
 import pdfParser from "pdf-parse-debugging-disabled";
 import dotenv from "dotenv";
 
@@ -179,6 +180,22 @@ export const handler: Handler = async (event) => {
           }
         } catch (gemErr: any) {
           diagnostics.gemini = { status: 'error', error: gemErr.message };
+        }
+
+        // Test Hugging Face
+        try {
+          if (process.env.HF_TOKEN) {
+            const hfModel = new HfInference(process.env.HF_TOKEN);
+            const res = await hfModel.featureExtraction({
+              model: "sentence-transformers/all-MiniLM-L6-v2",
+              inputs: "Diagnostic test",
+            }) as number[];
+            diagnostics.huggingface = { status: 'ok', dimension: res.length };
+          } else {
+            diagnostics.huggingface = { status: 'missing_token' };
+          }
+        } catch (hfErr: any) {
+          diagnostics.huggingface = { status: 'error', error: hfErr.message };
         }
 
         // Test insertion of a dummy vector (768 dimensions)

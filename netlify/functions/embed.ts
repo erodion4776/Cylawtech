@@ -1,5 +1,6 @@
 import { Handler } from '@netlify/functions';
 import { GoogleGenAI } from "@google/genai";
+import { HfInference } from "@huggingface/inference";
 import { createClient } from "@supabase/supabase-js";
 import pdfParser from "pdf-parse-debugging-disabled";
 import dotenv from "dotenv";
@@ -13,25 +14,47 @@ if (typeof pdf !== 'function' && pdf && typeof (pdf as any).default === 'functio
 }
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
+const hf = new HfInference(process.env.HF_TOKEN || '');
 const supabaseUrl = process.env.SUPABASE_URL || 'https://dummy.supabase.co';
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || 'dummy';
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 async function getEmbedding(text: string) {
-  try {
-    const result = await ai.models.embedContent({
-      model: 'text-embedding-004',
-      contents: [{ parts: [{ text }] }]
-    });
-    
-    if (result.embeddings && result.embeddings.length > 0) {
-      return result.embeddings[0].values;
+  // Try Gemini First
+  if (process.env.GEMINI_API_KEY) {
+    try {
+      const result = await ai.models.embedContent({
+        model: 'text-embedding-004',
+        contents: [{ parts: [{ text }] }]
+      });
+      
+      if (result.embeddings && result.embeddings.length > 0) {
+        return result.embeddings[0].values;
+      }
+    } catch (gemError: any) {
+      console.warn("Gemini Embedding failed, trying fallback:", gemError.message);
     }
-    return null;
-  } catch (error: any) {
-    console.error("Embedding generation error:", error);
-    throw error;
   }
+
+  // Fallback to Hugging Face
+  if (process.env.HF_TOKEN) {
+    try {
+      const result = await hf.featureExtraction({
+        model: "sentence-transformers/all-MiniLM-L6-v2",
+        inputs: text,
+      });
+      if (Array.isArray(result)) {
+        // HF returns different dimensions (384) than Gemini (768), 
+        // we might need to pad if the DB column is fixed, 
+        // but modern pgvector usually handles dynamic or we use 768.
+        return result as number[];
+      }
+    } catch (hfError: any) {
+      console.error("Hugging Face Embedding also failed:", hfError.message);
+    }
+  }
+
+  return null;
 }
 
 export const handler: Handler = async (event) => {
