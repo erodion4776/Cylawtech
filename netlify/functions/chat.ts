@@ -133,46 +133,93 @@ export const handler: Handler = async (event) => {
     Use the following context to answer: ${context}.
     ${hasPremiumTag ? "At the end of your response, naturally recommend our 'Premium Legal Drafting Guide' available in the Resource Store for $49.99." : ""}`;
 
-    const provider = activeModel.includes('groq') ? 'groq' : 'gemini';
-    const modelName = activeModel;
-
     let responseText = "";
 
-    // Fallback chain: Primary (Admin Selected) -> Gemini Fallback
+    // MULTI-TIER AI FALLBACK SYSTEM
+    // Tier 1: Primary Model (Admin Selected or Gemini Default)
+    // Tier 2: Groq Fallback
+    // Tier 3: Hugging Face Fallback
+
+    const tryGemini = async (model: string) => {
+      console.log(`Attempting Gemini (${model})...`);
+      const genModel = ai.getGenerativeModel({ model: model || 'gemini-1.5-flash' });
+      const result = await genModel.generateContent(systemPrompt + "\n\nUser: " + message);
+      return result.response.text();
+    };
+
+    const tryGroq = async () => {
+      if (!process.env.GROQ_API_KEY || process.env.GROQ_API_KEY === 'dummy') return null;
+      console.log("Attempting Groq (mixtral-8x7b-32768)...");
+      const completion = await groq.chat.completions.create({
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: message }
+        ],
+        model: "mixtral-8x7b-32768",
+      });
+      return completion.choices[0]?.message?.content || null;
+    };
+
+    const tryHuggingFace = async () => {
+      if (!process.env.HF_TOKEN || process.env.HF_TOKEN === 'dummy') return null;
+      console.log("Attempting Hugging Face (Mistral-7B-Instruct-v0.2)...");
+      const result = await hf.textGeneration({
+        model: 'mistralai/Mistral-7B-Instruct-v0.2',
+        inputs: `<s>[INST] ${systemPrompt} \n\n User Message: ${message} [/INST]`,
+        parameters: { max_new_tokens: 1000 }
+      });
+      let text = result.generated_text || "";
+      if (text.includes('[/INST]')) {
+        text = text.split('[/INST]').pop()?.trim() || text;
+      }
+      return text;
+    };
+
     try {
-      if (provider === 'groq' && process.env.GROQ_API_KEY && process.env.GROQ_API_KEY !== 'dummy') {
-        const completion = await groq.chat.completions.create({
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: message }
-          ],
-          model: modelName,
-        });
-        responseText = completion.choices[0]?.message?.content || "";
-      } else {
-        // Use correct Google AI SDK pattern
-        const geminiModel = ai.getGenerativeModel({ 
-          model: modelName.includes('gemini') ? modelName : 'gemini-1.5-flash' 
-        });
-        const geminiRes = await geminiModel.generateContent(systemPrompt + "\n\nUser: " + message);
-        responseText = geminiRes.response.text();
-      }
-    } catch (llmError: any) {
-      console.error("Primary LLM Error:", llmError);
-      
-      // Final desperation fallback to a reliable model
+      // 1. Primary Attempt (Usually Gemini or specific Groq model)
       try {
-        const fallbackModel = ai.getGenerativeModel({ model: 'gemini-1.5-flash' });
-        const finalRes = await fallbackModel.generateContent(systemPrompt + "\n\nUser: " + message);
-        responseText = finalRes.response.text();
-      } catch (fallbackError: any) {
-        console.error("Fallback LLM Error:", fallbackError);
-        throw new Error(`AI Service Unavailable: ${fallbackError.message}`);
+        if (activeModel.includes('groq')) {
+          responseText = await tryGroq() || "";
+        } else {
+          responseText = await tryGemini(activeModel) || "";
+        }
+      } catch (e: any) {
+        console.warn("Primary AI Tier failed:", e.message);
       }
+
+      // 2. Secondary Attempt (Gemini Flash if primary was something else/failed)
+      if (!responseText) {
+        try {
+          responseText = await tryGemini('gemini-1.5-flash');
+        } catch (e: any) {
+          console.warn("Secondary AI Tier (Gemini Flash) failed:", e.message);
+        }
+      }
+
+      // 3. Tertiary Attempt (Groq)
+      if (!responseText) {
+        try {
+          responseText = await tryGroq() || "";
+        } catch (e: any) {
+          console.warn("Tertiary AI Tier (Groq) failed:", e.message);
+        }
+      }
+
+      // 4. Quaternary Attempt (Hugging Face)
+      if (!responseText) {
+        try {
+          responseText = await tryHuggingFace() || "";
+        } catch (e: any) {
+          console.warn("Quaternary AI Tier (Hugging Face) failed:", e.message);
+        }
+      }
+
+    } catch (criticalError: any) {
+      console.error("Critical Failure in AI Fallback Chain:", criticalError);
     }
 
     if (!responseText) {
-       throw new Error("We are currently experiencing high traffic. Please try again in a few moments.");
+       throw new Error("All AI providers are currently unavailable. Our engineers have been notified.");
     }
 
     return {
