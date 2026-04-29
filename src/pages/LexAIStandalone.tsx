@@ -44,11 +44,12 @@ const LexAIStandalone = () => {
     setIsChatting(true);
     
     try {
-      const res = await fetch('/.netlify/functions/chat', {
+      const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           message: newMessage,
+          site: 'lexai', // Define site property explicitly
           jurisdiction,
           stage: mode
         })

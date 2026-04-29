@@ -82,16 +82,16 @@ export const handler: Handler = async (event) => {
     const apiKey = event.headers['x-api-key'] || event.headers['X-Api-Key'];
 
     if (!message) return { statusCode: 400, headers, body: JSON.stringify({ error: "Message is required" }) };
-    if (!site) return { statusCode: 400, headers, body: JSON.stringify({ error: "Site identifier is required" }) };
-    if (!apiKey) return { statusCode: 401, headers, body: JSON.stringify({ error: "API Key required" }) };
+
+    const isInternal = !apiKey;
+    const targetSite = site || 'lexai';
+
+    if (!isInternal && !site) {
+       return { statusCode: 400, headers, body: JSON.stringify({ error: "Site identifier is required" }) };
+    }
 
     // 0. Check global settings and API key validity
-    console.log(`Checking API Key: ${apiKey?.toString().substring(0, 8)}... for site: ${site}`);
-    
-    const [settingsRes, keyRes] = await Promise.all([
-      supabase.from('settings').select('*').single(),
-      supabase.from('api_keys').select('*').eq('key', apiKey as string).eq('site', site).eq('status', 'active').single()
-    ]);
+    const settingsRes = await supabase.from('settings').select('*').single();
 
     if (settingsRes.error) {
       console.error("Settings Lookup Error:", settingsRes.error);
@@ -103,17 +103,13 @@ export const handler: Handler = async (event) => {
       return { statusCode: 503, headers, body: JSON.stringify({ error: "API is currently disabled by administrator" }) };
     }
 
-    if (keyRes.error) {
-      console.error("API Key Lookup Error:", keyRes.error);
-      return { statusCode: 403, headers, body: JSON.stringify({ error: "Invalid or revoked API key for this site", details: keyRes.error.message }) };
+    if (!isInternal) {
+      const keyRes = await supabase.from('api_keys').select('*').eq('key', apiKey as string).eq('site', site).eq('status', 'active').single();
+      if (keyRes.error || !keyRes.data) {
+        return { statusCode: 403, headers, body: JSON.stringify({ error: "Invalid API key" }) };
+      }
     }
 
-    if (!keyRes.data) {
-      console.warn("No active API key found for this site/key combination.");
-      return { statusCode: 403, headers, body: JSON.stringify({ error: "Invalid API key" }) };
-    }
-
-    console.log("API Key validated successfully for site:", site);
     const activeModel = settingsRes.data.active_model || 'gemini-1.5-flash';
     
     // 1. Get relevant documents
@@ -125,7 +121,7 @@ export const handler: Handler = async (event) => {
         query_embedding: queryEmbedding,
         match_threshold: 0.5,
         match_count: 5,
-        p_site: site,
+        p_site: targetSite,
         p_context: jurisdiction || 'general'
       });
       if (!rpcError && matches) {

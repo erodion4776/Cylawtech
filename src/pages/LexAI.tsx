@@ -64,11 +64,12 @@ const LexAI = () => {
     setUsageCount(prev => prev + 1);
     
     try {
-      const res = await fetch('/.netlify/functions/chat', {
+      const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           message: newMessage,
+          site: 'lexai', // Provide default site since LexAI Playground needs it
           jurisdiction,
           stage: mode,
           editorContent

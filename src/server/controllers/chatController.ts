@@ -11,38 +11,37 @@ export const handleChat = async (req: Request, res: Response) => {
     return res.status(400).json({ error: "Message is required" });
   }
 
-  if (!site) {
-    return res.status(400).json({ error: "Site identifier is required" });
-  }
+  const isInternal = !apiKey;
+  const targetSite = site || 'lexai';
 
-  if (!apiKey) {
-    return res.status(401).json({ error: "API Key required" });
+  if (!isInternal && !site) {
+    return res.status(400).json({ error: "Site identifier is required" });
   }
 
   try {
     // 0. Check global settings and API key validity
-    const [settingsRes, keyRes] = await Promise.all([
-      supabase.from('settings').select('*').single(),
-      supabase.from('api_keys').select('*').eq('key', apiKey as string).eq('site', site).eq('status', 'active').single()
-    ]);
+    const settingsRes = await supabase.from('settings').select('*').single();
 
     if (settingsRes.error || !settingsRes.data?.api_enabled) {
       return res.status(503).json({ error: "API is currently disabled by administrator" });
     }
 
-    if (keyRes.error || !keyRes.data) {
-      return res.status(403).json({ error: "Invalid or revoked API key for this site" });
+    if (!isInternal) {
+      const keyRes = await supabase.from('api_keys').select('*').eq('key', apiKey as string).eq('site', site).eq('status', 'active').single();
+      if (keyRes.error || !keyRes.data) {
+        return res.status(403).json({ error: "Invalid or revoked API key for this site" });
+      }
     }
 
     // 1. Get relevant documents (RAG)
-    const relevantDocs = await getRelevantDocs(message, context || "general", site);
+    const relevantDocs = await getRelevantDocs(message, context || "general", targetSite);
 
     // 2. Generate AI reply
     // Use the model configured in settings if provided
     const activeModel = settingsRes.data.active_model;
-    const reply = await generateAIResponse(message, relevantDocs, activeModel);
+    const response = await generateAIResponse(message, relevantDocs, activeModel);
 
-    res.json({ reply });
+    res.json({ response });
   } catch (error: any) {
     console.error("Chat controller error:", error);
     res.status(500).json({ error: "Failed to process chat", details: error.message });
