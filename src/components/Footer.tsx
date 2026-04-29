@@ -19,14 +19,17 @@ const Footer = () => {
             <Link to="/" className="flex items-center gap-2 mb-6 group">
               <motion.div 
                 whileHover={{ rotate: 5, scale: 1.1 }}
-                className="w-8 h-8 bg-slate-900 rounded-lg flex items-center justify-center"
+                className="w-10 h-10 bg-slate-900 rounded-lg flex items-center justify-center"
               >
-                <span className="text-white font-bold text-xl">C</span>
+                <span className="text-white font-black text-xl tracking-tighter">LA</span>
               </motion.div>
-              <span className="font-bold text-xl tracking-tight text-slate-900">CyAzor LawTech Solutions</span>
+              <div className="flex flex-col">
+                <span className="font-bold text-xl tracking-tight text-slate-900 leading-none">LexAI</span>
+                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest leading-none">by CyAzor Tech</span>
+              </div>
             </Link>
             <p className="text-slate-500 text-sm leading-relaxed">
-              Empowering legal minds with AI and digital opportunities. Clean, structured, and powerful legal technology.
+              Empowering legal minds with professional legal intelligence. Powered by CyAzor Tech.
             </p>
             <div className="flex gap-4 mt-6">
               {[
@@ -75,12 +78,13 @@ const Footer = () => {
         </div>
 
         <div className="border-t border-slate-200 pt-8 flex flex-col md:flex-row justify-between items-center gap-4">
-          <p className="text-slate-400 text-xs">
-            © {new Date().getFullYear()} CyAzor LawTech Solutions. All rights reserved.
+          <p className="text-slate-400 text-xs text-center md:text-left leading-relaxed">
+            © {new Date().getFullYear()} CyAzor Tech. All rights reserved.<br/>
+            LexAI is a trademark of CyAzor Tech.
           </p>
           <div className="flex items-center gap-2 text-slate-400 text-xs">
             <Mail size={14} />
-            <span>contact@cyazor.com</span>
+            <span>contact@lexai.pro</span>
           </div>
         </div>
       </div>

@@ -1,31 +1,31 @@
 import React from 'react';
 import { motion } from 'motion/react';
-import { Users, Target, Lightbulb, ShieldCheck } from 'lucide-react';
+import { Users, Target, Scale, Brain, Globe, TrendingUp, Zap, Sparkles } from 'lucide-react';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 
 const About = () => {
-  useDocumentTitle('CyAzor - About');
+  useDocumentTitle('LexAI - Powered by CyAzor Tech');
 
   const values = [
     {
-      title: "Innovation",
-      desc: "Constantly pushing the boundaries of what's possible in legal technology.",
-      icon: <Lightbulb size={24} />
+      title: "Legal Precision",
+      desc: "Harnessing advanced LLMs to deliver accurate, citation-ready legal analysis.",
+      icon: <Scale size={24} />
     },
     {
-      title: "Integrity",
-      desc: "Maintaining the highest ethical standards in every solution we build.",
-      icon: <ShieldCheck size={24} />
+      title: "Technological Edge",
+      desc: "Integrating the latest in AI to give lawyers a speed advantage in research.",
+      icon: <Brain size={24} />
     },
     {
-      title: "Community",
-      desc: "Empowering a global network of legal professionals and tech enthusiasts.",
-      icon: <Users size={24} />
+      title: "Accessibility",
+      desc: "Making complex laws and legal tools accessible to everyone, everywhere.",
+      icon: <Globe size={24} />
     },
     {
-      title: "Impact",
-      desc: "Creating tangible value and career growth for our users.",
-      icon: <Target size={24} />
+      title: "Growth Focus",
+      desc: "Enabling legal professionals to scale their practice and expertise.",
+      icon: <TrendingUp size={24} />
     }
   ];
 
@@ -39,19 +39,21 @@ const About = () => {
             viewport={{ once: true }}
             transition={{ duration: 0.8, ease: [0.4, 0, 0.2, 1] }}
           >
-            <h1 className="text-4xl md:text-6xl font-bold text-slate-900 mb-8 tracking-tight">
-              About <span className="text-blue-600">CyAzor</span> LawTech Solutions
+            <h1 className="text-5xl md:text-7xl font-black text-slate-900 mb-8 tracking-tighter leading-none">
+              The Mind Behind <span className="text-blue-600 underline underline-offset-8">LexAI</span>
             </h1>
-            <p className="text-lg text-slate-600 mb-6 leading-relaxed">
-              CyAzor LawTech Solutions was founded with a singular vision: to modernize the legal industry 
-              by integrating cutting-edge technology with traditional legal expertise. We believe that 
-              the future of law is digital, and our mission is to ensure that every legal professional 
-              has the tools and knowledge to thrive in this new era.
+            <p className="text-xl text-slate-600 mb-8 leading-relaxed font-medium">
+              LexAI is the flagship product of **CyAzor Tech**, a pioneer in the intersection of digital growth and legal methodology. 
+              Founded by Attorney Cynthia Azor, our goal is to eliminate the friction in legal practice through intelligent automation.
             </p>
-            <p className="text-lg text-slate-600 leading-relaxed">
-              From AI-driven training programs to comprehensive bar preparation and digital legislative 
-              databases, we are building a complete ecosystem for the modern lawyer.
-            </p>
+            <div className="space-y-6 text-lg text-slate-500 leading-relaxed">
+              <p>
+                We believe the future of the legal profession belongs to those who can master the relationship between complex human judgment and high-speed artificial intelligence.
+              </p>
+              <p>
+                LexAI represents years of research into legal reasoning frameworks (IRAC), bar examination strategy, and large language model optimization. It’s not just a chat tool; it’s a professional legal workstation.
+              </p>
+            </div>
           </motion.div>
           <motion.div 
             initial={{ opacity: 0, x: 40 }}
@@ -60,7 +62,7 @@ const About = () => {
             transition={{ duration: 0.8, ease: [0.4, 0, 0.2, 1] }}
             className="relative"
           >
-            <div className="aspect-square bg-slate-100 rounded-[3rem] overflow-hidden shadow-2xl border-8 border-white">
+            <div className="aspect-[4/5] bg-slate-100 rounded-[3.5rem] overflow-hidden shadow-2xl border-4 border-slate-100">
               <img 
                 src="https://i.ibb.co/hF4k7B2Z/attorney-cynthia-azor-1.png" 
                 alt="Attorney Cynthia Azor" 
@@ -73,84 +75,53 @@ const About = () => {
               whileInView={{ opacity: 1, scale: 1 }}
               viewport={{ once: true }}
               transition={{ delay: 0.5 }}
-              className="absolute -bottom-8 -left-8 bg-white p-8 rounded-3xl shadow-xl border border-slate-100 max-w-xs hidden md:block"
+              className="absolute -bottom-8 -left-8 bg-slate-900 p-8 rounded-[2.5rem] shadow-2xl border border-slate-800 max-w-xs hidden md:block text-white"
             >
-              <p className="text-slate-900 font-bold text-xl mb-2">10k+</p>
-              <p className="text-slate-500 text-sm">Professionals empowered through our platforms.</p>
+              <div className="flex items-center gap-3 mb-4">
+                 <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
+                    <Sparkles size={16} />
+                 </div>
+                 <span className="font-bold">Founded 2024</span>
+              </div>
+              <p className="font-bold text-lg mb-2">LexAI Ecosystem</p>
+              <p className="text-slate-400 text-xs">Transforming how legal professionals interact with technology.</p>
             </motion.div>
           </motion.div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-24">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-32">
           {[
             {
-              title: "Mission",
-              desc: "To democratize access to legal technology and empower the next generation of legal professionals with the digital skills necessary to lead in an AI-driven world.",
-              img: "https://images.unsplash.com/photo-1522071820081-009f0129c71c?auto=format&fit=crop&q=80&w=400"
+               title: "Our Mission",
+               desc: "To equip legal minds with high-performance AI tools that simplify research and amplify career earnings.",
+               icon: <Target size={32} className="text-blue-600" />
             },
             {
-              title: "Vision",
-              desc: "A future where legal expertise is seamlessly integrated with technology, creating unprecedented opportunities for growth and innovation.",
-              img: "https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&q=80&w=400"
+               title: "Our Vision",
+               desc: "To become the global standard for legal-AI integration in developing and international markets.",
+               icon: <Globe size={32} className="text-indigo-600" />
             },
             {
-              title: "Why CyAzor?",
-              desc: "We bridge the gap between traditional practice and the digital frontier, providing the structure and power needed to succeed in a modern legal landscape.",
-              img: "https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?auto=format&fit=crop&q=80&w=400"
+               title: "Our Values",
+               desc: "Authority, Precision, and Velocity. We don't just build software; we build leverage.",
+               icon: <Zap size={32} className="text-emerald-600" />
             }
           ].map((item, i) => (
             <motion.div 
-              key={i}
-              initial={{ opacity: 0, y: 30 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              transition={{ delay: i * 0.2 }}
-              whileHover={{ y: -5 }}
-              className="rounded-3xl bg-white border border-slate-100 shadow-sm hover:shadow-md transition-all overflow-hidden group"
+               key={i}
+               initial={{ opacity: 0, y: 30 }}
+               whileInView={{ opacity: 1, y: 0 }}
+               viewport={{ once: true }}
+               transition={{ delay: i * 0.2 }}
+               className="p-10 rounded-[2.5rem] bg-slate-50 border border-slate-100 flex flex-col items-center text-center group hover:bg-white hover:shadow-2xl transition-all duration-500"
             >
-              <div className="h-40 overflow-hidden relative">
-                <img 
-                  src={item.img} 
-                  alt={item.title} 
-                  className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
-                  referrerPolicy="no-referrer"
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-white to-transparent"></div>
-              </div>
-              <div className="p-8 pt-0 -mt-8 relative z-10">
-                <h3 className="text-2xl font-bold text-slate-900 mb-4">{item.title}</h3>
-                <p className="text-slate-500 text-sm leading-relaxed">
-                  {item.desc}
-                </p>
-              </div>
+               <div className="mb-6 group-hover:scale-110 transition-transform">
+                  {item.icon}
+               </div>
+               <h3 className="text-2xl font-black text-slate-900 mb-4">{item.title}</h3>
+               <p className="text-slate-500 leading-relaxed font-medium">{item.desc}</p>
             </motion.div>
           ))}
-        </div>
-
-        <div className="mb-24">
-          <h2 className="text-3xl font-bold text-slate-900 mb-12 text-center">Our Core Values</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
-            {values.map((value, index) => (
-              <motion.div
-                key={index}
-                initial={{ opacity: 0, y: 20 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ delay: index * 0.1 }}
-                whileHover={{ y: -5, scale: 1.02 }}
-                className="p-8 rounded-3xl bg-slate-50 border border-slate-100 text-center transition-all"
-              >
-                <motion.div 
-                  whileHover={{ rotate: 15 }}
-                  className="w-12 h-12 bg-white rounded-2xl shadow-sm flex items-center justify-center text-blue-600 mx-auto mb-6"
-                >
-                  {value.icon}
-                </motion.div>
-                <h3 className="text-xl font-bold text-slate-900 mb-3">{value.title}</h3>
-                <p className="text-slate-500 text-sm leading-relaxed">{value.desc}</p>
-              </motion.div>
-            ))}
-          </div>
         </div>
       </section>
     </div>

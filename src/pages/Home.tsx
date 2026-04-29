@@ -227,7 +227,7 @@ const MicroLearning = () => {
 };
 
 const Home = () => {
-  useDocumentTitle('CyAzor LawTech Solutions - Law • Technology • Digital Growth');
+  useDocumentTitle('LexAI - Professional Legal Intelligence by CyAzor Tech');
 
   const containerVariants: Variants = {
     hidden: { opacity: 0 },
@@ -253,340 +253,193 @@ const Home = () => {
       <BackgroundMotion />
       
       {/* Hero Section */}
-      <section className="px-6 py-20 md:py-32 max-w-7xl mx-auto flex flex-col lg:flex-row items-center gap-12">
+      <section className="px-6 py-20 md:py-32 max-w-7xl mx-auto flex flex-col lg:flex-row items-center gap-12 text-center lg:text-left">
         <motion.div
           variants={containerVariants}
           initial="hidden"
           animate="visible"
-          className="lg:w-1/2 text-center lg:text-left"
+          className="lg:w-3/5"
         >
-          <motion.span 
+          <motion.div 
             variants={itemVariants}
-            className="inline-block px-4 py-1.5 mb-6 text-xs font-bold tracking-widest text-blue-600 uppercase bg-blue-50 rounded-full"
+            className="inline-flex items-center gap-2 px-4 py-2 mb-8 text-xs font-bold tracking-widest text-slate-900 uppercase bg-slate-100 rounded-full"
           >
-            The Future of Law & Technology
-          </motion.span>
+            <span className="w-2 h-2 bg-blue-600 rounded-full animate-pulse" />
+            LexAI is now live
+          </motion.div>
           <motion.h1 
             variants={itemVariants}
-            className="text-5xl md:text-7xl font-bold text-slate-900 mb-6 tracking-tight"
+            className="text-6xl md:text-8xl font-black text-slate-900 mb-8 tracking-tighter leading-[0.9]"
           >
-            Empowering Legal Minds with <span className="text-blue-600">AI & Digital Opportunities</span>
+            Professional Legal Intelligence. <span className="text-blue-600">Reimagined.</span>
           </motion.h1>
           <motion.p 
             variants={itemVariants}
-            className="text-xl text-slate-600 mb-10 max-w-2xl mx-auto lg:mx-0 leading-relaxed"
+            className="text-xl md:text-2xl text-slate-600 mb-12 max-w-2xl mx-auto lg:mx-0 leading-relaxed font-medium"
           >
-            Bridge the gap between traditional legal practice and the digital frontier. 
-            Confidence, structure, and power in every step of your legal journey.
+            Experience the power of LexAI, the industry-leading workstation for legal professionals. 
+            Powered by <Link to="/about" className="text-slate-900 font-bold border-b-2 border-slate-900 hover:text-blue-600 hover:border-blue-600 transition-all">CyAzor Tech</Link>, 
+            we bridge the gap between complex law and seamless technology.
           </motion.p>
           <motion.div 
             variants={itemVariants}
-            className="flex flex-col sm:flex-row items-center justify-center lg:justify-start gap-4"
+            className="flex flex-col sm:flex-row items-center justify-center lg:justify-start gap-6"
           >
             <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.97 }}>
               <Link
-                to="/ai-training"
-                className="w-full sm:w-auto bg-slate-900 text-white px-8 py-4 rounded-full font-bold flex items-center justify-center gap-2 hover:bg-slate-800 transition-all shadow-lg hover:shadow-xl"
+                to="/lex-ai"
+                className="w-full sm:w-auto bg-slate-900 text-white px-10 py-5 rounded-full font-black text-lg flex items-center justify-center gap-3 hover:bg-slate-800 transition-all shadow-2xl hover:shadow-black/20"
               >
-                Explore AI Training <ArrowRight size={18} />
+                Go to AI Playground <Zap size={22} fill="currentColor" />
               </Link>
             </motion.div>
             <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.97 }}>
               <Link
-                to="/bar-beyond"
-                className="w-full sm:w-auto bg-white text-slate-900 border border-slate-200 px-8 py-4 rounded-full font-bold flex items-center justify-center gap-2 hover:bg-slate-50 transition-all shadow-sm hover:shadow-md"
+                to="/ai-training"
+                className="w-full sm:w-auto bg-white text-slate-900 border-2 border-slate-100 px-10 py-5 rounded-full font-bold text-lg flex items-center justify-center gap-2 hover:bg-slate-50 transition-all shadow-sm"
               >
-                See Bar & Beyond
+                Learn More
               </Link>
             </motion.div>
+          </motion.div>
+          
+          <motion.div 
+            variants={itemVariants}
+            className="mt-12 flex items-center justify-center lg:justify-start gap-8 grayscale opacity-50"
+          >
+            <p className="text-[10px] uppercase tracking-widest font-black text-slate-400">Trusted By Professionals At</p>
+            {/* Trusted indicators */}
+            <div className="flex gap-4 font-bold text-slate-900">
+               <span>SUPREME COURT</span>
+               <span>•</span>
+               <span>LAW SOCIETY</span>
+            </div>
           </motion.div>
         </motion.div>
 
         <motion.div 
-          initial={{ opacity: 0, x: 40 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ duration: 0.8, delay: 0.4 }}
-          className="lg:w-1/2 relative"
+          initial={{ opacity: 0, scale: 0.9, rotate: -2 }}
+          animate={{ opacity: 1, scale: 1, rotate: 0 }}
+          transition={{ duration: 1, delay: 0.4 }}
+          className="lg:w-2/5 relative"
         >
-          <div className="relative z-10 rounded-[3rem] overflow-hidden shadow-2xl border-8 border-white bg-slate-100">
-            <img 
-              src="https://i.ibb.co/hF4k7B2Z/attorney-cynthia-azor-1.png" 
-              alt="Attorney Cynthia Azor" 
-              className="w-full h-[500px] object-cover object-top"
-              referrerPolicy="no-referrer"
-            />
-            <div className="absolute inset-0 bg-gradient-to-t from-slate-900/40 to-transparent"></div>
+          <div className="relative z-10 p-4 bg-white rounded-[3rem] shadow-2xl border-2 border-slate-100">
+             <div className="rounded-[2.5rem] overflow-hidden aspect-[4/5] bg-slate-100">
+                <img 
+                  src="https://images.unsplash.com/photo-1505664194779-8beaceb93744?auto=format&fit=crop&q=80&w=1000" 
+                  alt="LexAI Architecture" 
+                  className="w-full h-full object-cover"
+                />
+             </div>
+             {/* Floating UI Card */}
+             <motion.div 
+                animate={{ y: [0, -10, 0] }}
+                transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
+                className="absolute -bottom-8 -left-8 bg-white p-6 rounded-3xl shadow-2xl border border-slate-100 max-w-[240px]"
+             >
+                <div className="flex items-center gap-3 mb-4">
+                   <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
+                      <Scale size={16} className="text-white" />
+                   </div>
+                   <span className="font-bold text-slate-900">Legal Analyzer</span>
+                </div>
+                <div className="space-y-2">
+                   <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+                      <motion.div 
+                        initial={{ width: 0 }}
+                        animate={{ width: "85%" }}
+                        className="h-full bg-blue-600"
+                        transition={{ duration: 2, delay: 1 }}
+                      />
+                   </div>
+                   <p className="text-[10px] text-slate-400 font-bold">PRECEDENT MATCH FOUND</p>
+                </div>
+             </motion.div>
           </div>
-          {/* Floating AI Elements */}
-          <motion.div 
-            animate={{ y: [0, -20, 0] }}
-            transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
-            className="absolute -top-6 -right-6 bg-white p-4 rounded-2xl shadow-xl z-20 border border-slate-100"
-          >
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center text-blue-600">
-                <Brain size={20} />
-              </div>
-              <div>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">AI Analysis</p>
-                <p className="text-sm font-bold text-slate-900">98% Accuracy</p>
+          <div className="absolute -top-12 -right-12 w-64 h-64 bg-blue-200/20 rounded-full blur-3xl -z-10 animate-pulse"></div>
+        </motion.div>
+      </section>
+
+      {/* Brand Pillar Section */}
+      <section className="px-6 py-32 bg-slate-900 text-white overflow-hidden relative">
+        <div className="max-w-7xl mx-auto relative z-10">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-20 items-center">
+            <div>
+              <h2 className="text-4xl md:text-6xl font-black mb-8 leading-[0.95]">
+                Built for the <br /> <span className="text-blue-500 underline underline-offset-8">Law of Tomorrow.</span>
+              </h2>
+              <p className="text-xl text-slate-400 mb-12 leading-relaxed">
+                CyAzor Tech introduces LexAI, a revolutionary legal intelligence platform engineered to augment the capabilities of legal researchers, advocates, and solicitors.
+              </p>
+              <div className="grid grid-cols-2 gap-8">
+                <div>
+                  <h4 className="text-4xl font-black text-blue-500 mb-2">99%</h4>
+                  <p className="text-sm font-bold text-slate-500 uppercase tracking-widest">Research Speedup</p>
+                </div>
+                <div>
+                  <h4 className="text-4xl font-black text-blue-500 mb-2">24/7</h4>
+                  <p className="text-sm font-bold text-slate-500 uppercase tracking-widest">AI Availability</p>
+                </div>
               </div>
             </div>
-          </motion.div>
-          <div className="absolute -bottom-10 -left-10 w-64 h-64 bg-blue-400/20 rounded-full blur-3xl -z-10"></div>
-        </motion.div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {[
+                { title: "Precision", desc: "Rigorous attention to legal precedents and statutes.", icon: <Shield size={24} /> },
+                { title: "Velocity", desc: "Instant answers to complex legal inquiries.", icon: <Zap size={24} /> },
+                { title: "Growth", desc: "Monetize your legal expertise with AI training.", icon: <TrendingUp size={24} /> },
+                { title: "Authority", desc: "Stay compliant with local Naija laws.", icon: <Globe size={24} /> },
+              ].map((pillar, i) => (
+                <div key={i} className="p-8 rounded-[2.5rem] bg-white/5 border border-white/10 hover:bg-white/10 transition-all group">
+                   <div className="w-12 h-12 bg-white/10 rounded-2xl flex items-center justify-center mb-6 group-hover:bg-blue-600 transition-colors">
+                      {pillar.icon}
+                   </div>
+                   <h4 className="text-xl font-bold mb-2">{pillar.title}</h4>
+                   <p className="text-sm text-slate-500 leading-relaxed">{pillar.desc}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+        {/* Decorative mask */}
+        <div className="absolute top-0 right-0 w-1/3 h-full bg-blue-600/10 skew-x-12 translate-x-1/2 blur-[100px] pointer-events-none"></div>
       </section>
 
       <SmartPathSelector />
 
-      <MyJourney />
-
-      {/* Quick Highlights Section */}
-      <section className="px-6 py-20 bg-slate-50/50 backdrop-blur-sm">
-        <div className="max-w-7xl mx-auto">
-          <motion.div 
-            initial="hidden"
-            whileInView="visible"
-            viewport={{ once: true, margin: "-100px" }}
-            variants={containerVariants}
-            className="grid grid-cols-1 md:grid-cols-3 gap-8"
-          >
-            {[
-              {
-                title: "AI Training",
-                desc: "Master the tools reshaping the legal industry.",
-                icon: <Brain size={24} />,
-                path: "/ai-training",
-                color: "text-blue-600 bg-blue-100",
-                img: "https://images.unsplash.com/photo-1677442136019-21780ecad995?auto=format&fit=crop&q=80&w=400"
-              },
-              {
-                title: "Bar & Beyond",
-                desc: "Strategic resources for exam success and career growth.",
-                icon: <Scale size={24} />,
-                path: "/bar-beyond",
-                color: "text-indigo-600 bg-indigo-100",
-                img: "https://images.unsplash.com/photo-1589829545856-d10d557cf95f?auto=format&fit=crop&q=80&w=400"
-              },
-              {
-                title: "Naija Laws",
-                desc: "Digital access to Nigerian legislation and case law.",
-                icon: <Globe size={24} />,
-                path: "/naija-laws",
-                color: "text-emerald-600 bg-emerald-100",
-                img: "https://images.unsplash.com/photo-1523292562811-8fa7962a78c8?auto=format&fit=crop&q=80&w=400"
-              }
-            ].map((item, idx) => (
-              <motion.div
-                key={idx}
-                variants={itemVariants}
-                whileHover={{ y: -10, boxShadow: "0 20px 25px -5px rgb(0 0 0 / 0.1)" }}
-                className="bg-white rounded-3xl shadow-sm border border-slate-100 flex flex-col items-start transition-all duration-300 overflow-hidden group"
-              >
-                <div className="w-full h-40 overflow-hidden relative">
-                  <img 
-                    src={item.img} 
-                    alt={item.title} 
-                    className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
-                    referrerPolicy="no-referrer"
-                  />
-                  <div className="absolute inset-0 bg-gradient-to-t from-white to-transparent"></div>
-                </div>
-                <div className="p-8 pt-0 -mt-8 relative z-10">
-                  <motion.div 
-                    whileHover={{ scale: 1.1, rotate: 5 }}
-                    className={cn("w-12 h-12 rounded-2xl flex items-center justify-center mb-6 shadow-lg", item.color)}
-                  >
-                    {item.icon}
-                  </motion.div>
-                  <h3 className="text-xl font-bold text-slate-900 mb-3">{item.title}</h3>
-                  <p className="text-slate-500 text-sm mb-6 leading-relaxed">
-                    {item.desc}
-                  </p>
-                  <Link to={item.path} className="text-blue-600 font-bold text-sm flex items-center gap-2 hover:translate-x-1 transition-transform mt-auto">
-                    Learn More <ArrowRight size={16} />
-                  </Link>
-                </div>
-              </motion.div>
-            ))}
-          </motion.div>
-        </div>
-      </section>
-
-      <MicroLearning />
-
-      {/* Featured Path Box */}
-      <section className="px-6 py-20">
-        <motion.div 
-          initial={{ opacity: 0, scale: 0.95 }}
-          whileInView={{ opacity: 1, scale: 1 }}
-          viewport={{ once: true }}
-          transition={{ duration: 0.8, ease: [0.4, 0, 0.2, 1] }}
-          className="max-w-5xl mx-auto bg-white rounded-[3rem] border border-slate-200 overflow-hidden shadow-2xl flex flex-col md:flex-row"
-        >
-          <div className="md:w-1/2 p-12 flex flex-col justify-center">
-            <h2 className="text-3xl font-bold text-slate-900 mb-8">Choose Your Growth Path</h2>
-            <div className="space-y-6">
-              <motion.div 
-                whileHover={{ x: 10 }}
-                className="p-6 rounded-2xl bg-slate-50 border border-slate-100 text-left group cursor-pointer"
-              >
-                <h4 className="text-xl font-bold text-slate-900 mb-2">AI Income Path</h4>
-                <p className="text-slate-500 text-sm mb-4">Learn how to turn your professional expertise into digital assets.</p>
-                <Link to="/ai-training" className="inline-flex items-center gap-2 text-blue-600 font-bold text-sm">
-                  Explore Path <ArrowRight size={16} className="group-hover:translate-x-1 transition-transform" />
-                </Link>
-              </motion.div>
-              <motion.div 
-                whileHover={{ x: 10 }}
-                className="p-6 rounded-2xl bg-slate-50 border border-slate-100 text-left group cursor-pointer"
-              >
-                <h4 className="text-xl font-bold text-slate-900 mb-2">Legal Career Growth</h4>
-                <p className="text-slate-500 text-sm mb-4">Strategic mentorship and resources for the modern legal market.</p>
-                <Link to="/bar-beyond" className="inline-flex items-center gap-2 text-blue-600 font-bold text-sm">
-                  Explore Path <ArrowRight size={16} className="group-hover:translate-x-1 transition-transform" />
-                </Link>
-              </motion.div>
-            </div>
-          </div>
-          <div className="md:w-1/2 relative min-h-[400px]">
-            <img 
-              src="https://images.unsplash.com/photo-1521737711867-e3b97375f902?auto=format&fit=crop&q=80&w=800" 
-              alt="Collaboration" 
-              className="absolute inset-0 w-full h-full object-cover"
-              referrerPolicy="no-referrer"
-            />
-            <div className="absolute inset-0 bg-blue-600/10 mix-blend-multiply"></div>
-          </div>
-        </motion.div>
-      </section>
-
-      {/* About the Platform Section */}
-      <section className="px-6 py-24 max-w-7xl mx-auto">
-        <div className="text-center mb-16">
-          <motion.h2 
-            initial={{ opacity: 0, y: 20 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            className="text-3xl md:text-4xl font-bold text-slate-900 mb-4"
-          >
-            About CyAzor Ecosystem
-          </motion.h2>
-          <motion.p 
-            initial={{ opacity: 0, y: 20 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            transition={{ delay: 0.2 }}
-            className="text-slate-600 max-w-2xl mx-auto"
-          >
-            A unified approach to legal education, technology integration, and professional development.
-          </motion.p>
-        </div>
-
-        <motion.div 
-          initial="hidden"
-          whileInView="visible"
-          viewport={{ once: true }}
-          variants={containerVariants}
-          className="grid grid-cols-1 md:grid-cols-3 gap-8"
-        >
-          {[
-            {
-              title: "AI Training Hub",
-              desc: "Master the art of AI training and digital income generation.",
-              icon: <Brain size={24} />,
-              color: "bg-blue-50 text-blue-600",
-              path: "/ai-training",
-              img: "https://images.unsplash.com/photo-1620712943543-bcc4688e7485?auto=format&fit=crop&q=80&w=400"
-            },
-            {
-              title: "Legal Growth Hub",
-              desc: "Comprehensive resources for bar prep and career advancement.",
-              icon: <TrendingUp size={24} />,
-              color: "bg-indigo-50 text-indigo-600",
-              path: "/bar-beyond",
-              img: "https://images.unsplash.com/photo-1450101499163-c8848c66ca85?auto=format&fit=crop&q=80&w=400"
-            },
-            {
-              title: "Naija Law Access",
-              desc: "Digitizing the Nigerian legal landscape for modern practitioners.",
-              icon: <Globe size={24} />,
-              color: "bg-emerald-50 text-emerald-600",
-              path: "/naija-laws",
-              img: "https://images.unsplash.com/photo-1521791136064-7986c2923216?auto=format&fit=crop&q=80&w=400"
-            }
-          ].map((item, index) => (
-            <motion.div key={index} variants={itemVariants}>
-              <Link
-                to={item.path}
-                className="rounded-3xl border border-slate-100 hover:border-blue-200 transition-all group bg-white shadow-sm block h-full overflow-hidden"
-              >
-                <div className="h-48 overflow-hidden">
-                  <img 
-                    src={item.img} 
-                    alt={item.title} 
-                    className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
-                    referrerPolicy="no-referrer"
-                  />
-                </div>
-                <div className="p-8">
-                  <div className={cn("w-12 h-12 rounded-xl flex items-center justify-center mb-6 transition-transform group-hover:scale-110 shadow-md", item.color)}>
-                    {item.icon}
-                  </div>
-                  <h4 className="text-xl font-bold text-slate-900 mb-3">{item.title}</h4>
-                  <p className="text-slate-500 text-sm leading-relaxed mb-6">{item.desc}</p>
-                  <span className="text-blue-600 font-bold text-sm flex items-center gap-2 group-hover:translate-x-1 transition-transform">
-                    Explore Hub <ArrowRight size={16} />
-                  </span>
-                </div>
-              </Link>
-            </motion.div>
-          ))}
-        </motion.div>
-      </section>
-
       <OnboardingSteps />
 
-      {/* Call to Action */}
-      <section className="px-6 py-20">
+      {/* LexAI CTA */}
+      <section className="px-6 py-32">
         <motion.div 
           initial={{ opacity: 0, y: 40 }}
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true }}
-          transition={{ duration: 0.8 }}
-          className="max-w-5xl mx-auto bg-gradient-to-br from-blue-600 to-indigo-700 rounded-[2.5rem] p-12 md:p-20 text-center text-white relative overflow-hidden shadow-2xl"
+          className="max-w-7xl mx-auto bg-blue-600 rounded-[4rem] p-16 md:p-32 text-center text-white relative overflow-hidden shadow-2xl"
         >
-          <div className="relative z-10">
-            <h2 className="text-3xl md:text-5xl font-bold mb-6">Unlock Future Legal Solutions</h2>
-            <p className="text-blue-100 text-lg mb-10 max-w-xl mx-auto">
-              Join thousands of professionals who are already transforming their careers with CyAzor.
+          <div className="relative z-10 max-w-3xl mx-auto">
+            <h2 className="text-4xl md:text-7xl font-black mb-8 leading-none">Ready to Test LexAI?</h2>
+            <p className="text-blue-100 text-xl font-medium mb-12">
+              Join the new era of legal work. Start your free trial in the LexAI Playground today.
             </p>
-            <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+            <div className="flex flex-col sm:flex-row gap-4 justify-center">
+              <Link
+                to="/lex-ai"
+                className="bg-white text-blue-700 px-12 py-5 rounded-full font-black text-xl hover:bg-blue-50 transition-all shadow-xl"
+              >
+                Start Legal Chat
+              </Link>
               <Link
                 to="/contact"
-                className="bg-white text-blue-700 px-10 py-4 rounded-full font-bold hover:bg-blue-50 transition-all inline-block shadow-lg"
+                className="bg-blue-700 text-white px-12 py-5 rounded-full font-black text-xl border-2 border-white/20 hover:bg-blue-800 transition-all"
               >
-                Get Started Today
+                Enterprise Solutions
               </Link>
-            </motion.div>
+            </div>
           </div>
-          {/* Decorative elements */}
-          <motion.div 
-            animate={{ 
-              scale: [1, 1.2, 1],
-              opacity: [0.1, 0.2, 0.1]
-            }}
-            transition={{ duration: 10, repeat: Infinity }}
-            className="absolute top-0 left-0 w-64 h-64 bg-white rounded-full -translate-x-1/2 -translate-y-1/2 blur-3xl"
-          />
-          <motion.div 
-            animate={{ 
-              scale: [1, 1.3, 1],
-              opacity: [0.2, 0.3, 0.2]
-            }}
-            transition={{ duration: 12, repeat: Infinity }}
-            className="absolute bottom-0 right-0 w-64 h-64 bg-blue-400 rounded-full translate-x-1/2 translate-y-1/2 blur-3xl"
-          />
+          
+          {/* Decorative mesh */}
+          <div className="absolute inset-0 opacity-20 pointer-events-none" 
+               style={{backgroundImage: 'radial-gradient(circle at 2px 2px, white 1px, transparent 0)', backgroundSize: '40px 40px'}}></div>
         </motion.div>
       </section>
     </div>

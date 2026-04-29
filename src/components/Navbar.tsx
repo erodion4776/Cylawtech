@@ -19,11 +19,10 @@ const Navbar = () => {
 
   const navLinks = [
     { name: 'Home', path: '/' },
+    { name: 'LexAI Playground', path: '/lex-ai' },
     { name: 'AI Training', path: '/ai-training' },
     { name: 'Bar & Beyond', path: '/bar-beyond' },
-    { name: 'LexAI', path: '/lex-ai' },
     { name: 'Store', path: '/resource-store' },
-    { name: 'Naija Laws', path: '/naija-laws' },
     { name: 'About', path: '/about' },
     { name: 'Contact', path: '/contact' },
   ];
@@ -39,11 +38,14 @@ const Navbar = () => {
         <Link to="/" className="flex items-center gap-2 group">
           <motion.div 
             whileHover={{ rotate: 5, scale: 1.05 }}
-            className="w-8 h-8 bg-slate-900 rounded-lg flex items-center justify-center"
+            className="w-10 h-10 bg-slate-900 rounded-lg flex items-center justify-center"
           >
-            <span className="text-white font-bold text-xl">C</span>
+            <span className="text-white font-black text-xl tracking-tighter">LA</span>
           </motion.div>
-          <span className="font-bold text-xl tracking-tight text-slate-900">CyAzor LawTech Solutions</span>
+          <div className="flex flex-col">
+            <span className="font-bold text-xl tracking-tight text-slate-900 leading-none">LexAI</span>
+            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest leading-none">by CyAzor Tech</span>
+          </div>
         </Link>
 
         {/* Desktop Nav */}

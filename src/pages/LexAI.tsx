@@ -12,10 +12,17 @@ import Markdown from 'react-markdown';
 import TipTapEditor from '../components/TipTapEditor';
 
 const LexAI = () => {
-  useDocumentTitle('CyAzor - LexAI Workspace');
+  useDocumentTitle('LexAI Workspace - Professional Legal Intelligence');
   const [mode, setMode] = useState<'prep' | 'training' | 'practice'>('prep');
   const [jurisdiction, setJurisdiction] = useState<'nigeria' | 'us'>('nigeria');
   
+  // Usage tracking
+  const [usageCount, setUsageCount] = useState(() => {
+    const saved = localStorage.getItem('lexai_usage');
+    return saved ? parseInt(saved, 10) : 0;
+  });
+  const [showPaywall, setShowPaywall] = useState(false);
+
   // Editor State
   const [editorContent, setEditorContent] = useState('<h2>Legal Memo</h2><p>Issue: ...</p><p>Rule: ...</p><p>Analysis: ...</p><p>Conclusion: ...</p>');
 
@@ -24,11 +31,15 @@ const LexAI = () => {
   const [chatHistory, setChatHistory] = useState<{role: 'user' | 'ai', content: string, suggestedResource?: any}[]>([
     { 
       role: 'ai', 
-      content: "Welcome to your LexAI Workspace. I'm your legal mentor. I've set our focus to **Nigerian Law** and **Prep Mode**. How can I help you structure your IRAC framework today?" 
+      content: "Welcome to your LexAI Workspace. I'm your legal intelligence partner. I've set our focus to **Nigerian Law** and **Prep Mode**. How can I help you today?" 
     }
   ]);
   const [isChatting, setIsChatting] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    localStorage.setItem('lexai_usage', usageCount.toString());
+  }, [usageCount]);
 
   const scrollToBottom = () => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -40,10 +51,17 @@ const LexAI = () => {
 
   const handleChat = async () => {
     if (!chatMessage) return;
+
+    if (usageCount >= 3) {
+      setShowPaywall(true);
+      return;
+    }
+
     const newMessage = chatMessage;
     setChatMessage('');
     setChatHistory(prev => [...prev, { role: 'user', content: newMessage }]);
     setIsChatting(true);
+    setUsageCount(prev => prev + 1);
     
     try {
       const res = await fetch('/.netlify/functions/chat', {
@@ -89,15 +107,68 @@ const LexAI = () => {
   };
 
   return (
-    <div className="pt-20 min-h-screen bg-white flex flex-col">
+    <div className="pt-20 min-h-screen bg-white flex flex-col relative">
+      <AnimatePresence>
+        {showPaywall && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-slate-900/40 backdrop-blur-md"
+          >
+            <motion.div 
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              className="bg-white rounded-[3rem] p-10 md:p-16 max-w-2xl w-full shadow-2xl text-center border-4 border-blue-500"
+            >
+              <div className="w-20 h-20 bg-blue-600/10 text-blue-600 rounded-3xl flex items-center justify-center mx-auto mb-8">
+                <Lock size={40} />
+              </div>
+              <h2 className="text-4xl font-black text-slate-900 mb-6 leading-tight">Subscribe to Unlock Full LexAI Power</h2>
+              <p className="text-xl text-slate-600 mb-10 leading-relaxed">
+                You've completed your free trial messages. To continue accessing LexAI's deep legal intelligence and workspace tools, choose a subscription plan.
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-10">
+                 <div className="p-6 rounded-2xl bg-slate-50 border border-slate-200 text-left">
+                    <p className="text-[10px] font-bold text-blue-600 uppercase mb-1">Monthly</p>
+                    <h4 className="text-2xl font-black text-slate-900">$29<span className="text-sm font-normal text-slate-400">/mo</span></h4>
+                 </div>
+                 <div className="p-6 rounded-2xl bg-blue-600 text-white text-left relative overflow-hidden">
+                    <p className="text-[10px] font-bold text-blue-200 uppercase mb-1">Annual (Save 20%)</p>
+                    <h4 className="text-2xl font-black">$249<span className="text-sm font-normal text-blue-200">/yr</span></h4>
+                    <Sparkles size={40} className="absolute -right-2 -bottom-2 opacity-20" />
+                 </div>
+              </div>
+              <div className="flex flex-col gap-4">
+                <Link
+                  to="/contact"
+                  className="bg-blue-600 text-white px-10 py-5 rounded-full font-black text-xl hover:bg-blue-700 transition-all shadow-lg"
+                >
+                  Join the Waitlist / Subscribe
+                </Link>
+                <button 
+                  onClick={() => setShowPaywall(false)}
+                  className="text-slate-400 font-bold hover:text-slate-600"
+                >
+                  Maybe later
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Header / Toolbar */}
       <header className="bg-white border-b border-slate-200 px-6 py-3 flex flex-wrap items-center justify-between gap-4 sticky top-20 z-40">
         <div className="flex items-center gap-6">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-[#1e3a8a] rounded-lg flex items-center justify-center text-white">
-              <Scale size={18} />
+            <div className="w-10 h-10 bg-slate-900 rounded-lg flex items-center justify-center text-white">
+              <Scale size={20} />
             </div>
-            <span className="font-bold text-slate-900">LexAI Workspace</span>
+            <div className="flex flex-col">
+              <span className="font-black text-slate-900 tracking-tighter">LexAI Workspace</span>
+              <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">Powered by CyAzor Tech</span>
+            </div>
           </div>
           
           {/* Jurisdiction Toggle */}
