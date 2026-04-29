@@ -100,11 +100,15 @@ export const handler: Handler = async (event) => {
     if (filename?.toLowerCase().endsWith('.pdf')) {
       currentStep = "Parsing PDF text";
       try {
+        if (typeof pdf !== 'function') {
+          throw new Error("PDF parser is not a function. Initialization failed.");
+        }
         const data = await pdf(buffer);
         text = data.text;
+        console.log(`PDF parsed successfully. Characters: ${text.length}`);
       } catch (pdfErr: any) {
-        console.error("PDF Parse Error:", pdfErr);
-        throw new Error(`Failed to parse PDF: ${pdfErr.message}`);
+        console.error("PDF Parse Error Detail:", pdfErr);
+        throw new Error(`Failed to parse PDF (${filename}): ${pdfErr.message || String(pdfErr)}`);
       }
     } else {
       currentStep = "Reading text content";

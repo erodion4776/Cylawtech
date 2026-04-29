@@ -377,13 +377,24 @@ export default function AdminSaaS() {
                     <button 
                       onClick={async () => {
                         try {
+                          setUploadDiagnostics({ status: 'loading', message: 'Running comprehensive connectivity test...', timestamp: new Date().toLocaleTimeString() });
                           const res = await fetch(`${API_BASE}/test-db`, {
                             headers: { 'x-admin-key': adminKey }
                           });
                           const data = await res.json();
-                          alert(`DB Check: ${JSON.stringify(data, null, 2)}`);
+                          setUploadDiagnostics({
+                            status: res.ok ? 'success' : 'error',
+                            message: res.ok ? 'Connectivity test complete.' : 'Test partially failed.',
+                            details: JSON.stringify(data, null, 2),
+                            timestamp: new Date().toLocaleTimeString()
+                          });
                         } catch (e: any) {
-                          alert(`DB Check failed: ${e.message}`);
+                          setUploadDiagnostics({
+                            status: 'error',
+                            message: 'Network error during test',
+                            details: e.message,
+                            timestamp: new Date().toLocaleTimeString()
+                          });
                         }
                       }}
                       className="text-[10px] font-bold bg-slate-900 hover:bg-slate-800 text-slate-400 px-3 py-1 rounded-lg border border-slate-800 transition-colors"

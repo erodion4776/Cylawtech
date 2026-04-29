@@ -125,21 +125,29 @@ export const handler: Handler = async (event) => {
       };
 
       try {
-        // Check documents table
-        const { data: docData, error: docError } = await supabase.from('documents').select('count', { count: 'exact', head: true });
-        diagnostics.tables.documents = docError ? { status: 'error', error: docError } : { status: 'ok', count: docData };
+        // Check documents table schema and count
+        const { count: docCount, error: docError } = await supabase.from('documents').select('*', { count: 'exact', head: true });
+        const { error: selectError } = await supabase.from('documents').select('id, content, embedding, site, context').limit(0);
+        
+        diagnostics.tables.documents = {
+          status: docError ? 'error' : 'ok',
+          count: docCount,
+          schema: selectError ? { status: 'missing_columns', error: selectError.message } : 'ok'
+        };
         
         // Check api_keys table
-        const { data: keyData, error: keyError } = await supabase.from('api_keys').select('count', { count: 'exact', head: true });
-        diagnostics.tables.api_keys = keyError ? { status: 'error', error: keyError } : { status: 'ok', count: keyData };
+        const { count: keyCount, error: keyError } = await supabase.from('api_keys').select('*', { count: 'exact', head: true });
+        diagnostics.tables.api_keys = keyError ? { status: 'error', error: keyError } : { status: 'ok', count: keyCount };
 
         // Check settings table
-        const { data: setData, error: setError } = await supabase.from('settings').select('count', { count: 'exact', head: true });
-        diagnostics.tables.settings = setError ? { status: 'error', error: setError } : { status: 'ok', count: setData };
+        const { count: setCount, error: setError } = await supabase.from('settings').select('*', { count: 'exact', head: true });
+        diagnostics.tables.settings = setError ? { status: 'error', error: setError } : { status: 'ok', count: setCount };
 
         // Test Gemini Embedding
         try {
-          const aiModel = new (require('@google/generative-ai').GoogleGenerativeAI)(process.env.GEMINI_API_KEY);
+          // Dynamic require to avoid ESM issues if needed, or use the already imported GoogleGenerativeAI
+          const { GoogleGenerativeAI } = require('@google/generative-ai');
+          const aiModel = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
           const model = aiModel.getGenerativeModel({ model: "text-embedding-004" });
           const res = await model.embedContent("Diagnostic test");
           if (res.embedding) {
@@ -154,24 +162,23 @@ export const handler: Handler = async (event) => {
         // Test insertion of a dummy vector (768 dimensions)
         const dummyVector = new Array(768).fill(0);
         const { error: insertError } = await supabase.from('documents').insert({
-          content: 'DIAGNOSTIC_TEST_ENTRY',
+          content: 'DIAGNOSTIC_TEST_ENTRY_TO_DELETE',
           embedding: dummyVector,
           site: 'diagnostic',
           context: 'test'
-        }).select();
+        });
 
         if (insertError) {
           diagnostics.embedding_check = { 
             status: 'failed', 
             error: insertError.message, 
             code: insertError.code,
-            hint: insertError.hint || 'Could be a dimension mismatch (Expected 1536 but got 768?)' 
+            hint: insertError.hint || 'Dimension mismatch? (Table might expect 1536)' 
           };
-          // Cleanup if it somehow succeeded but returned error (unlikely)
         } else {
           diagnostics.embedding_check = { status: 'ok', message: '768-dimension vector accepted' };
           // Cleanup
-          await supabase.from('documents').delete().eq('content', 'DIAGNOSTIC_TEST_ENTRY');
+          await supabase.from('documents').delete().eq('content', 'DIAGNOSTIC_TEST_ENTRY_TO_DELETE');
         }
 
         diagnostics.supabase.status = 'connected';
