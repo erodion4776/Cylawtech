@@ -330,8 +330,42 @@ export default function AdminSaaS() {
               initial={{ opacity: 0, x: 20 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -20 }}
-              className="grid grid-cols-1 md:grid-cols-2 gap-8"
             >
+              <div className="bg-[#0c0c0c] border border-slate-900 p-8 rounded-2xl mb-8">
+                <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
+                  <ExternalLink className="w-5 h-5 text-emerald-500" />
+                  Netlify Configuration Checklist
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {[
+                    { name: 'SUPABASE_URL', description: 'Supabase API URL', status: !!settings },
+                    { name: 'SUPABASE_SERVICE_ROLE_KEY', description: 'Supabase Secret Key', status: !!settings },
+                    { name: 'GEMINI_API_KEY', description: 'Google AI API Key', status: !!settings },
+                    { name: 'ADMIN_KEY', description: 'SaaS Admin Password', status: isAuth },
+                  ].map((env) => (
+                    <div key={env.name} className="flex items-center justify-between p-4 bg-slate-950/50 rounded-xl border border-slate-800/50">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <code className="text-blue-400 font-bold text-xs">{env.name}</code>
+                          {env.status ? (
+                            <span className="text-[10px] bg-emerald-500/10 text-emerald-500 px-1.5 py-0.5 rounded font-bold uppercase">Detected</span>
+                          ) : (
+                            <span className="text-[10px] bg-amber-500/10 text-amber-500 px-1.5 py-0.5 rounded font-bold uppercase">Missing?</span>
+                          )}
+                        </div>
+                        <p className="text-slate-500 text-[10px] mt-1">{env.description}</p>
+                      </div>
+                      {env.status ? (
+                        <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                      ) : (
+                        <AlertCircle className="w-4 h-4 text-amber-500" />
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                <div className="bg-[#0c0c0c] border border-slate-900 p-8 rounded-2xl">
                  <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
                    <Power className="w-5 h-5 text-blue-500" />

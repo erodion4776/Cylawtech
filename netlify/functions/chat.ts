@@ -23,16 +23,12 @@ console.log("LexAI Chat Function Initialized", {
 async function getEmbedding(text: string) {
   try {
     console.log(`Generating embedding for text: ${text.substring(0, 50)}...`);
-    const result = await ai.models.embedContent({
-      model: "gemini-embedding-2-preview",
-      contents: text,
-      config: {
-        outputDimensionality: 768
-      }
-    });
-    if (result.embeddings && result.embeddings.length > 0) {
+    const model = ai.getGenerativeModel({ model: "text-embedding-004" });
+    const result = await model.embedContent(text);
+    
+    if (result.embedding && result.embedding.values) {
       console.log("Embedding generated successfully.");
-      return result.embeddings[0].values;
+      return result.embedding.values;
     }
     console.error("No embeddings found in result.");
     return null;
@@ -154,20 +150,25 @@ export const handler: Handler = async (event) => {
         });
         responseText = completion.choices[0]?.message?.content || "";
       } else {
-        const geminiRes = await ai.models.generateContent({
-          model: modelName.includes('gemini') ? modelName : 'gemini-1.5-flash',
-          contents: systemPrompt + "\n\nUser: " + message,
+        // Use correct Google AI SDK pattern
+        const geminiModel = ai.getGenerativeModel({ 
+          model: modelName.includes('gemini') ? modelName : 'gemini-1.5-flash' 
         });
-        responseText = geminiRes.text || "";
+        const geminiRes = await geminiModel.generateContent(systemPrompt + "\n\nUser: " + message);
+        responseText = geminiRes.response.text();
       }
-    } catch (llmError) {
-      console.error("LLM Error:", llmError);
-      // Final desperation fallback
-      const finalRes = await ai.models.generateContent({
-        model: 'gemini-1.5-flash',
-        contents: systemPrompt + "\n\nUser: " + message,
-      });
-      responseText = finalRes.text || "";
+    } catch (llmError: any) {
+      console.error("Primary LLM Error:", llmError);
+      
+      // Final desperation fallback to a reliable model
+      try {
+        const fallbackModel = ai.getGenerativeModel({ model: 'gemini-1.5-flash' });
+        const finalRes = await fallbackModel.generateContent(systemPrompt + "\n\nUser: " + message);
+        responseText = finalRes.response.text();
+      } catch (fallbackError: any) {
+        console.error("Fallback LLM Error:", fallbackError);
+        throw new Error(`AI Service Unavailable: ${fallbackError.message}`);
+      }
     }
 
     if (!responseText) {
