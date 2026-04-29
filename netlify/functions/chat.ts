@@ -1,12 +1,12 @@
 import { Handler } from '@netlify/functions';
 import Groq from "groq-sdk";
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import { HfInference } from "@huggingface/inference";
 import { createClient } from "@supabase/supabase-js";
 
 // Initialize AI Clients
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY || 'dummy' });
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
+const ai = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || 'dummy');
 const hf = new HfInference(process.env.HF_TOKEN || 'dummy');
 
 // Initialize Supabase
@@ -23,14 +23,12 @@ console.log("LexAI Chat Function Initialized", {
 async function getEmbedding(text: string) {
   try {
     console.log(`Generating embedding for text: ${text.substring(0, 50)}...`);
-    const result = await ai.models.embedContent({
-      model: "gemini-embedding-2-preview",
-      contents: text
-    });
+    const model = ai.getGenerativeModel({ model: "text-embedding-004" });
+    const result = await model.embedContent(text);
     
-    if (result.embeddings && result.embeddings.length > 0) {
+    if (result.embedding && result.embedding.values) {
       console.log("Embedding generated successfully.");
-      return result.embeddings[0].values;
+      return result.embedding.values;
     }
     console.error("No embeddings found in result.");
     return null;
@@ -126,13 +124,33 @@ export const handler: Handler = async (event) => {
       stageInstructions = "Provide templates for real-world memos and contracts. Guide the user through the drafting process.";
     }
 
-    const systemPrompt = `You are a supportive, knowledgeable legal mentor. 
-    Personality: Conversational, relatable, no heavy jargon. Focus on teaching 'how to think'.
-    Jurisdiction: ${jurisdiction === 'nigeria' ? 'Nigerian Law' : 'US Law'}.
-    Current Stage: ${stage}.
-    ${stageInstructions}
+    const systemPrompt = `
+You are a professional legal assistant for a law firm.
+
+RULES:
+- Answer ONLY based on provided documents (RAG context)
+- If information is not found, say: "Please contact the firm for proper legal advice"
+- Be SHORT, CLEAR, and PROFESSIONAL
+- Do NOT give general life advice
+- Do NOT speak like a mentor or teacher
+- Do NOT assume US law unless specified
+
+STYLE:
+- Straight to the point
+- No storytelling
+- No long explanations
+- No motivational tone
+
+FORMAT:
+- Answer directly
+- Use bullet points if needed
+
+CONTEXT:
+${context}
+
+QUESTION:
+${message}
     
-    Use the following context to answer: ${context}.
     ${hasPremiumTag ? "At the end of your response, naturally recommend our 'Premium Legal Drafting Guide' available in the Resource Store for $49.99." : ""}`;
 
     let responseText = "";
@@ -144,21 +162,19 @@ export const handler: Handler = async (event) => {
 
     const report: string[] = [];
 
-    const tryGemini = async (model: string) => {
-      if (!process.env.GEMINI_API_KEY) {
-        report.push(`Gemini (${model}): Missing GEMINI_API_KEY`);
+    const tryGemini = async (modelName: string) => {
+      if (!process.env.GEMINI_API_KEY || process.env.GEMINI_API_KEY === 'dummy') {
+        report.push(`Gemini (${modelName}): Missing GEMINI_API_KEY`);
         return null;
       }
       try {
-        console.log(`Attempting Gemini (${model})...`);
-        const result = await ai.models.generateContent({
-          model: model || 'gemini-3-flash-preview',
-          contents: systemPrompt + "\n\nUser: " + message
-        });
-        return result.text;
+        console.log(`Attempting Gemini (${modelName})...`);
+        const model = ai.getGenerativeModel({ model: modelName || 'gemini-1.5-flash' });
+        const result = await model.generateContent(systemPrompt + "\n\nUser: " + message);
+        return result.response.text();
       } catch (e: any) {
-        report.push(`Gemini (${model}): ${e.message}`);
-        console.warn(`Gemini (${model}) failed:`, e.message);
+        report.push(`Gemini (${modelName}): ${e.message}`);
+        console.warn(`Gemini (${modelName}) failed:`, e.message);
         return null;
       }
     };

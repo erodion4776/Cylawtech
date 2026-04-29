@@ -1,23 +1,21 @@
 import { Handler } from '@netlify/functions';
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import { createClient } from "@supabase/supabase-js";
 
 // @ts-ignore
 const pdf = require("pdf-parse-debugging-disabled");
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || 'dummy' });
+const ai = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || 'dummy');
 const supabaseUrl = process.env.SUPABASE_URL || 'https://dummy.supabase.co';
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || 'dummy';
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 async function getEmbedding(text: string) {
   try {
-    const result = await ai.models.embedContent({
-      model: "gemini-embedding-2-preview",
-      contents: text
-    });
-    if (result.embeddings && result.embeddings.length > 0) {
-      return result.embeddings[0].values;
+    const model = ai.getGenerativeModel({ model: "text-embedding-004" });
+    const result = await model.embedContent(text);
+    if (result.embedding && result.embedding.values) {
+      return result.embedding.values;
     }
     return null;
   } catch (error: any) {
