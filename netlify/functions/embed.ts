@@ -24,8 +24,8 @@ async function getEmbedding(text: string) {
   if (process.env.GEMINI_API_KEY) {
     try {
       const result = await ai.models.embedContent({
-        model: 'text-embedding-004',
-        contents: [{ parts: [{ text }] }]
+        model: 'gemini-embedding-2-preview',
+        contents: [text]
       });
       
       if (result.embeddings && result.embeddings.length > 0) {
@@ -36,17 +36,14 @@ async function getEmbedding(text: string) {
     }
   }
 
-  // Fallback to Hugging Face
+  // Fallback to Hugging Face (all-mpnet-base-v2 is 768 dimensions)
   if (process.env.HF_TOKEN) {
     try {
       const result = await hf.featureExtraction({
-        model: "sentence-transformers/all-MiniLM-L6-v2",
+        model: "sentence-transformers/all-mpnet-base-v2",
         inputs: text,
       });
       if (Array.isArray(result)) {
-        // HF returns different dimensions (384) than Gemini (768), 
-        // we might need to pad if the DB column is fixed, 
-        // but modern pgvector usually handles dynamic or we use 768.
         return result as number[];
       }
     } catch (hfError: any) {

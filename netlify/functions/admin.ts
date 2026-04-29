@@ -170,8 +170,8 @@ export const handler: Handler = async (event) => {
         try {
           const aiModel = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
           const res = await aiModel.models.embedContent({
-            model: 'text-embedding-004',
-            contents: [{ parts: [{ text: "Diagnostic test" }] }]
+            model: 'gemini-embedding-2-preview',
+            contents: ["Diagnostic test"]
           });
           if (res.embeddings && res.embeddings.length > 0) {
             diagnostics.gemini = { status: 'ok', dimension: res.embeddings[0].values.length };
@@ -187,7 +187,7 @@ export const handler: Handler = async (event) => {
           if (process.env.HF_TOKEN) {
             const hfModel = new HfInference(process.env.HF_TOKEN);
             const res = await hfModel.featureExtraction({
-              model: "sentence-transformers/all-MiniLM-L6-v2",
+              model: "sentence-transformers/all-mpnet-base-v2",
               inputs: "Diagnostic test",
             }) as number[];
             diagnostics.huggingface = { status: 'ok', dimension: res.length };

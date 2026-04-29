@@ -26,8 +26,8 @@ async function getEmbedding(text: string) {
     try {
       console.log(`Generating embedding for text: ${text.substring(0, 50)}...`);
       const result = await ai.models.embedContent({
-        model: "text-embedding-004",
-        contents: [{ parts: [{ text }] }]
+        model: "gemini-embedding-2-preview",
+        contents: [text]
       });
       
       if (result.embeddings && result.embeddings.length > 0) {
@@ -43,7 +43,7 @@ async function getEmbedding(text: string) {
   if (process.env.HF_TOKEN) {
     try {
       const result = await hf.featureExtraction({
-        model: "sentence-transformers/all-MiniLM-L6-v2",
+        model: "sentence-transformers/all-mpnet-base-v2",
         inputs: text,
       });
       if (Array.isArray(result)) {
