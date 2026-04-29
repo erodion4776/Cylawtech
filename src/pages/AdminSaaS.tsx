@@ -15,7 +15,8 @@ import {
   Search,
   ExternalLink,
   ChevronRight,
-  Database
+  Database,
+  Copy
 } from 'lucide-react';
 
 interface Settings {
@@ -50,6 +51,7 @@ export default function AdminSaaS() {
   const [docs, setDocs] = useState<Document[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   useEffect(() => {
     if (adminKey) {
@@ -147,6 +149,12 @@ export default function AdminSaaS() {
     } catch (e) {
       setError("Failed to revoke key");
     }
+  };
+
+  const handleCopyKey = (key: string) => {
+    navigator.clipboard.writeText(key);
+    setCopiedKey(key);
+    setTimeout(() => setCopiedKey(null), 2000);
   };
 
   const handleDeleteDoc = async (id: string) => {
@@ -386,9 +394,25 @@ export default function AdminSaaS() {
                           {k.site}
                         </td>
                         <td className="p-4 font-mono text-xs text-slate-400">
-                          <code className="bg-slate-950 p-1 rounded border border-slate-800">
-                            {k.key.substring(0, 10)}****************
-                          </code>
+                          <div className="flex items-center gap-2">
+                            <code className="bg-slate-950 p-1 rounded border border-slate-800">
+                              {k.key.substring(0, 10)}****************
+                            </code>
+                            <button 
+                              onClick={() => handleCopyKey(k.key)}
+                              className={`p-1.5 rounded-lg border transition-all ${
+                                copiedKey === k.key 
+                                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' 
+                                  : 'bg-slate-900 border-slate-800 text-slate-500 hover:text-white hover:border-slate-700'
+                              }`}
+                              title="Copy Full Key"
+                            >
+                              {copiedKey === k.key ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                            </button>
+                            {copiedKey === k.key && (
+                              <span className="text-[10px] text-emerald-500 font-bold animate-pulse">COPIED</span>
+                            )}
+                          </div>
                         </td>
                         <td className="p-4 text-xs">
                           <span className={`px-2.5 py-1 rounded-full font-bold border ${
