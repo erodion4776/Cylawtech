@@ -72,8 +72,31 @@ export const handler: Handler = async (event) => {
   }
 
   try {
-    const { message, jurisdiction, stage, editorContent } = JSON.parse(event.body || '{}');
+    const body = JSON.parse(event.body || '{}');
+    const { message, jurisdiction, stage, editorContent, site, context: userContext } = body;
+    const apiKey = event.headers['x-api-key'];
+
+    if (!message) return { statusCode: 400, body: JSON.stringify({ error: "Message is required" }) };
+    if (!site) return { statusCode: 400, body: JSON.stringify({ error: "Site identifier is required" }) };
+    if (!apiKey) return { statusCode: 401, body: JSON.stringify({ error: "API Key required" }) };
+
+    // 0. Check global settings and API key validity
+    const [settingsRes, keyRes] = await Promise.all([
+      supabase.from('settings').select('*').single(),
+      supabase.from('api_keys').select('*').eq('key', apiKey as string).eq('site', site).eq('status', 'active').single()
+    ]);
+
+    if (settingsRes.error || !settingsRes.data?.api_enabled) {
+      return { statusCode: 503, body: JSON.stringify({ error: "API is currently disabled by administrator" }) };
+    }
+
+    if (keyRes.error || !keyRes.data) {
+      return { statusCode: 403, body: JSON.stringify({ error: "Invalid or revoked API key for this site" }) };
+    }
+
+    const activeModel = settingsRes.data.active_model || 'gemini-1.5-flash';
     
+    // 1. Get relevant documents
     const context = await findRelevantContext(message, jurisdiction);
     console.log(`Context search complete. Found context: ${context.length > 0}`);
       
@@ -97,50 +120,37 @@ export const handler: Handler = async (event) => {
     Use the following context to answer: ${context}.
     ${hasPremiumTag ? "At the end of your response, naturally recommend our 'Premium Legal Drafting Guide' available in the Resource Store for $49.99." : ""}`;
 
+    const provider = activeModel.includes('groq') ? 'groq' : 'gemini';
+    const modelName = activeModel;
+
     let responseText = "";
 
-    // Fallback chain: Groq -> Gemini -> HuggingFace
+    // Fallback chain: Primary (Admin Selected) -> Gemini Fallback
     try {
-      if (process.env.GROQ_API_KEY && process.env.GROQ_API_KEY !== 'dummy') {
+      if (provider === 'groq' && process.env.GROQ_API_KEY && process.env.GROQ_API_KEY !== 'dummy') {
         const completion = await groq.chat.completions.create({
           messages: [
             { role: "system", content: systemPrompt },
             { role: "user", content: message }
           ],
-          model: "mixtral-8x7b-32768",
+          model: modelName,
         });
         responseText = completion.choices[0]?.message?.content || "";
-        if (!responseText) throw new Error("GROQ returned empty response");
       } else {
-        throw new Error("GROQ_API_KEY not set");
-      }
-    } catch (groqError) {
-      console.log("GROQ failed or skipped, trying Gemini...");
-      try {
         const geminiRes = await ai.models.generateContent({
-          model: 'gemini-3-flash-preview',
+          model: modelName.includes('gemini') ? modelName : 'gemini-1.5-flash',
           contents: systemPrompt + "\n\nUser: " + message,
         });
         responseText = geminiRes.text || "";
-        if (!responseText) throw new Error("Gemini returned empty response");
-      } catch (geminiError: any) {
-        console.error("Gemini failed:", geminiError);
-        try {
-          if (process.env.HF_TOKEN && process.env.HF_TOKEN !== 'dummy') {
-            const hfResponse = await hf.textGeneration({
-              model: "meta-llama/Llama-2-7b-chat-hf",
-              inputs: systemPrompt + "\n\nUser: " + message,
-            });
-            responseText = hfResponse.generated_text || "";
-            if (!responseText) throw new Error("HF returned empty response");
-          } else {
-             throw new Error("HF_TOKEN not set");
-          }
-        } catch (hfError) {
-          console.error("HuggingFace failed:", hfError);
-          responseText = "";
-        }
       }
+    } catch (llmError) {
+      console.error("LLM Error:", llmError);
+      // Final desperation fallback
+      const finalRes = await ai.models.generateContent({
+        model: 'gemini-1.5-flash',
+        contents: systemPrompt + "\n\nUser: " + message,
+      });
+      responseText = finalRes.text || "";
     }
 
     if (!responseText) {
