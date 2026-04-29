@@ -6,10 +6,12 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-const require = createRequire(import.meta.url);
 let pdf: any;
 try {
-  const pdfModule = require("pdf-parse-debugging-disabled");
+  // Use a fallback for environments where import.meta.url is undefined
+  const currentUrl = import.meta.url || `file://${process.cwd()}/index.js`;
+  const requireFunc = createRequire(currentUrl);
+  const pdfModule = requireFunc("pdf-parse-debugging-disabled");
   pdf = typeof pdfModule === 'function' ? pdfModule : pdfModule.default;
 } catch (e) {
   console.error("Failed to load pdf-parse module:", e);

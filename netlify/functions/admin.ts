@@ -1,5 +1,7 @@
 import { Handler } from '@netlify/functions';
 import { createClient } from "@supabase/supabase-js";
+import { GoogleGenerativeAI } from "@google/generative-ai";
+import { createRequire } from 'module';
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -139,15 +141,23 @@ export const handler: Handler = async (event) => {
         const { count: keyCount, error: keyError } = await supabase.from('api_keys').select('*', { count: 'exact', head: true });
         diagnostics.tables.api_keys = keyError ? { status: 'error', error: keyError } : { status: 'ok', count: keyCount };
 
-        // Check settings table
+        // Check Settings table
         const { count: setCount, error: setError } = await supabase.from('settings').select('*', { count: 'exact', head: true });
         diagnostics.tables.settings = setError ? { status: 'error', error: setError } : { status: 'ok', count: setCount };
 
+        // Test PDF Parser load
+        try {
+          const currentUrl = import.meta.url || `file://${process.cwd()}/index.js`;
+          const requireFunc = createRequire(currentUrl);
+          const pdfParser = requireFunc("pdf-parse-debugging-disabled");
+          diagnostics.pdf_parser = { status: 'ok', loaded: !!pdfParser };
+        } catch (pdfErr: any) {
+          diagnostics.pdf_parser = { status: 'error', error: pdfErr.message };
+        }
+
         // Test Gemini Embedding
         try {
-          // Dynamic require to avoid ESM issues if needed, or use the already imported GoogleGenerativeAI
-          const { GoogleGenerativeAI } = require('@google/generative-ai');
-          const aiModel = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+          const aiModel = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
           const model = aiModel.getGenerativeModel({ model: "text-embedding-004" });
           const res = await model.embedContent("Diagnostic test");
           if (res.embedding) {
