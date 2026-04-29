@@ -1,7 +1,7 @@
 import { Handler } from '@netlify/functions';
 import { createClient } from "@supabase/supabase-js";
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import { createRequire } from 'module';
+import pdfParser from "pdf-parse-debugging-disabled";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -147,10 +147,18 @@ export const handler: Handler = async (event) => {
 
         // Test PDF Parser load
         try {
-          const currentUrl = import.meta.url || `file://${process.cwd()}/index.js`;
-          const requireFunc = createRequire(currentUrl);
-          const pdfParser = requireFunc("pdf-parse-debugging-disabled");
-          diagnostics.pdf_parser = { status: 'ok', loaded: !!pdfParser };
+          let pdf: any = pdfParser;
+          if (typeof pdf !== 'function' && pdf && typeof (pdf as any).default === 'function') {
+            pdf = (pdf as any).default;
+          }
+          const loaded = typeof pdf === 'function';
+          diagnostics.pdf_parser = { 
+            status: 'ok', 
+            loaded, 
+            type: typeof pdfParser,
+            hasDefault: !!(pdfParser as any)?.default,
+            isFunction: typeof pdfParser === 'function'
+          };
         } catch (pdfErr: any) {
           diagnostics.pdf_parser = { status: 'error', error: pdfErr.message };
         }

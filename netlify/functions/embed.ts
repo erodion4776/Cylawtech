@@ -1,20 +1,18 @@
 import { Handler } from '@netlify/functions';
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { createClient } from "@supabase/supabase-js";
-import { createRequire } from 'module';
+import pdfParser from "pdf-parse-debugging-disabled";
 import dotenv from "dotenv";
 
 dotenv.config();
 
-let pdf: any;
-try {
-  // Use a fallback for environments where import.meta.url is undefined
-  const currentUrl = import.meta.url || `file://${process.cwd()}/index.js`;
-  const requireFunc = createRequire(currentUrl);
-  const pdfModule = requireFunc("pdf-parse-debugging-disabled");
-  pdf = typeof pdfModule === 'function' ? pdfModule : pdfModule.default;
-} catch (e) {
-  console.error("Failed to load pdf-parse module:", e);
+// Handle both commonjs and esm default exports for the PDF parser
+let pdf: any = pdfParser;
+if (typeof pdf !== 'function' && pdf && typeof (pdf as any).default === 'function') {
+  pdf = (pdf as any).default;
+}
+if (typeof pdf !== 'function' && pdf && typeof (pdf as any).pdf === 'function') {
+  pdf = (pdf as any).pdf;
 }
 
 const ai = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
