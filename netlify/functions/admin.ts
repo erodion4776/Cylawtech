@@ -9,15 +9,26 @@ const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || 'dummy';
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 export const handler: Handler = async (event) => {
+  const headers = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Headers": "Content-Type, x-admin-key",
+    "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
+    "Content-Type": "application/json"
+  };
+
+  if (event.httpMethod === "OPTIONS") {
+    return { statusCode: 204, headers, body: "" };
+  }
+
   const adminKey = event.headers['x-admin-key'];
   const expectedKey = process.env.ADMIN_KEY;
 
   if (!expectedKey) {
-    return { statusCode: 500, body: JSON.stringify({ error: "Server misconfiguration: No admin key set" }) };
+    return { statusCode: 500, headers, body: JSON.stringify({ error: "Server misconfiguration: No admin key set" }) };
   }
 
   if (adminKey !== expectedKey) {
-    return { statusCode: 403, body: JSON.stringify({ error: "Forbidden: Invalid Admin Key" }) };
+    return { statusCode: 403, headers, body: JSON.stringify({ error: "Forbidden: Invalid Admin Key" }) };
   }
 
   const fullPath = event.path;
@@ -39,7 +50,7 @@ export const handler: Handler = async (event) => {
     if (method === 'GET' && (path === 'settings' || path === '')) {
       const { data, error } = await supabase.from('settings').select('*').single();
       if (error) throw error;
-      return { statusCode: 200, body: JSON.stringify(data) };
+      return { statusCode: 200, headers, body: JSON.stringify(data) };
     }
 
     // PATCH settings
@@ -52,14 +63,14 @@ export const handler: Handler = async (event) => {
         .select()
         .single();
       if (error) throw error;
-      return { statusCode: 200, body: JSON.stringify(data) };
+      return { statusCode: 200, headers, body: JSON.stringify(data) };
     }
 
     // GET keys
     if (method === 'GET' && path === 'keys') {
       const { data, error } = await supabase.from('api_keys').select('*').order('created_at', { ascending: false });
       if (error) throw error;
-      return { statusCode: 200, body: JSON.stringify(data) };
+      return { statusCode: 200, headers, body: JSON.stringify(data) };
     }
 
     // POST keys
@@ -72,7 +83,7 @@ export const handler: Handler = async (event) => {
         .select()
         .single();
       if (error) throw error;
-      return { statusCode: 200, body: JSON.stringify(data) };
+      return { statusCode: 200, headers, body: JSON.stringify(data) };
     }
 
     // DELETE keys/:id
@@ -80,14 +91,14 @@ export const handler: Handler = async (event) => {
       const id = path.split('/')[1];
       const { error } = await supabase.from('api_keys').update({ status: 'revoked' }).eq('id', id);
       if (error) throw error;
-      return { statusCode: 200, body: JSON.stringify({ message: "Key revoked" }) };
+      return { statusCode: 200, headers, body: JSON.stringify({ message: "Key revoked" }) };
     }
 
     // GET documents
     if (method === 'GET' && path === 'documents') {
       const { data, error } = await supabase.from('documents').select('id, content, site, context, metadata').limit(100);
       if (error) throw error;
-      return { statusCode: 200, body: JSON.stringify(data) };
+      return { statusCode: 200, headers, body: JSON.stringify(data) };
     }
 
     // DELETE documents/:id
@@ -95,12 +106,12 @@ export const handler: Handler = async (event) => {
       const id = path.split('/')[1];
       const { error } = await supabase.from('documents').delete().eq('id', id);
       if (error) throw error;
-      return { statusCode: 200, body: JSON.stringify({ message: "Document deleted" }) };
+      return { statusCode: 200, headers, body: JSON.stringify({ message: "Document deleted" }) };
     }
 
-    return { statusCode: 404, body: JSON.stringify({ error: "Endpoint not found", path }) };
+    return { statusCode: 404, headers, body: JSON.stringify({ error: "Endpoint not found", path }) };
   } catch (error: any) {
     console.error("Admin Function Error:", error);
-    return { statusCode: 500, body: JSON.stringify({ error: error.message || "Internal Server Error" }) };
+    return { statusCode: 500, headers, body: JSON.stringify({ error: error.message || "Internal Server Error" }) };
   }
 };

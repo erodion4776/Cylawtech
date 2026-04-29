@@ -30,8 +30,19 @@ async function getEmbedding(text: string) {
 }
 
 export const handler: Handler = async (event) => {
+  const headers = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Headers": "Content-Type, x-api-key, x-admin-key",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Content-Type": "application/json"
+  };
+
+  if (event.httpMethod === "OPTIONS") {
+    return { statusCode: 204, headers, body: "" };
+  }
+
   if (event.httpMethod !== 'POST') {
-    return { statusCode: 405, body: 'Method Not Allowed' };
+    return { statusCode: 405, headers, body: 'Method Not Allowed' };
   }
 
   let currentStep = "Initializing";
@@ -39,10 +50,10 @@ export const handler: Handler = async (event) => {
   let lastDbError = "";
   try {
     currentStep = "Parsing JSON Body";
-    const { fileBase64, filename, jurisdiction, difficulty, productTag } = JSON.parse(event.body || '{}');
+    const { fileBase64, filename, site, context: uploadContext, jurisdiction, difficulty, productTag } = JSON.parse(event.body || '{}');
 
     if (!fileBase64) {
-      return { statusCode: 400, body: JSON.stringify({ error: "No file provided" }) };
+      return { statusCode: 400, headers, body: JSON.stringify({ error: "No file provided" }) };
     }
 
     currentStep = "Decoding Base64 to Buffer";
@@ -78,6 +89,8 @@ export const handler: Handler = async (event) => {
           const { error } = await supabase.from('documents').insert({
             content: chunk,
             embedding,
+            site: site || 'global',
+            context: uploadContext || jurisdiction || 'general',
             metadata: { 
               jurisdiction, 
               difficulty, 
@@ -114,7 +127,7 @@ export const handler: Handler = async (event) => {
     if (processedCount === 0 && chunks.length > 0) {
       return {
         statusCode: 500,
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ 
           error: finalMessage,
           details: lastEmbedError || lastDbError
@@ -124,7 +137,7 @@ export const handler: Handler = async (event) => {
 
     return {
       statusCode: 200,
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({ 
         message: finalMessage,
         embedErrorDetails: lastEmbedError
@@ -134,6 +147,7 @@ export const handler: Handler = async (event) => {
     console.error(`Embedding API Error at step [${currentStep}]:`, error);
     return {
       statusCode: 500,
+      headers,
       body: JSON.stringify({ 
         error: `Failed to process document.`,
         step: currentStep,

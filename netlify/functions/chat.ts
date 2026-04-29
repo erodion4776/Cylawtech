@@ -36,49 +36,32 @@ async function getEmbedding(text: string) {
   }
 }
 
-async function findRelevantContext(queryText: string, jurisdiction: string) {
-  console.log(`Finding context for jurisdiction: ${jurisdiction}`);
-  const queryEmbedding = await getEmbedding(queryText);
-  if (!queryEmbedding) {
-     console.error("Failed to get query embedding.");
-     return "No context available due to embedding error.";
-  }
-
-  console.log("Searching Supabase for relevant documents...");
-  const { data, error } = await supabase.rpc('match_documents', {
-    query_embedding: queryEmbedding,
-    match_threshold: 0.5,
-    match_count: 5,
-    filter: { jurisdiction: jurisdiction }
-  });
-
-  if (error) {
-    console.error("Supabase RPC error:", error);
-    return `Error searching database: ${error.message}`;
-  }
-
-  if (!data || data.length === 0) {
-    console.log("No relevant documents found.");
-    return `No official ${jurisdiction} statutes found in our current database. Please advise the user based on general legal principles.`;
-  }
-
-  console.log(`Found ${data.length} relevant context chunks.`);
-  return data.map((doc: any) => doc.content).join("\n\n---\n\n");
-}
-
 export const handler: Handler = async (event) => {
+  // CORS Headers
+  const headers = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Headers": "Content-Type, x-api-key, x-admin-key",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Content-Type": "application/json"
+  };
+
+  // Handle Preflight (OPTIONS)
+  if (event.httpMethod === "OPTIONS") {
+    return { statusCode: 204, headers, body: "" };
+  }
+
   if (event.httpMethod !== 'POST') {
-    return { statusCode: 405, body: 'Method Not Allowed' };
+    return { statusCode: 405, headers, body: 'Method Not Allowed' };
   }
 
   try {
     const body = JSON.parse(event.body || '{}');
     const { message, jurisdiction, stage, editorContent, site, context: userContext } = body;
-    const apiKey = event.headers['x-api-key'];
+    const apiKey = event.headers['x-api-key'] || event.headers['X-Api-Key'];
 
-    if (!message) return { statusCode: 400, body: JSON.stringify({ error: "Message is required" }) };
-    if (!site) return { statusCode: 400, body: JSON.stringify({ error: "Site identifier is required" }) };
-    if (!apiKey) return { statusCode: 401, body: JSON.stringify({ error: "API Key required" }) };
+    if (!message) return { statusCode: 400, headers, body: JSON.stringify({ error: "Message is required" }) };
+    if (!site) return { statusCode: 400, headers, body: JSON.stringify({ error: "Site identifier is required" }) };
+    if (!apiKey) return { statusCode: 401, headers, body: JSON.stringify({ error: "API Key required" }) };
 
     // 0. Check global settings and API key validity
     const [settingsRes, keyRes] = await Promise.all([
@@ -87,18 +70,31 @@ export const handler: Handler = async (event) => {
     ]);
 
     if (settingsRes.error || !settingsRes.data?.api_enabled) {
-      return { statusCode: 503, body: JSON.stringify({ error: "API is currently disabled by administrator" }) };
+      return { statusCode: 503, headers, body: JSON.stringify({ error: "API is currently disabled by administrator" }) };
     }
 
     if (keyRes.error || !keyRes.data) {
-      return { statusCode: 403, body: JSON.stringify({ error: "Invalid or revoked API key for this site" }) };
+      return { statusCode: 403, headers, body: JSON.stringify({ error: "Invalid or revoked API key for this site" }) };
     }
 
     const activeModel = settingsRes.data.active_model || 'gemini-1.5-flash';
     
     // 1. Get relevant documents
-    const context = await findRelevantContext(message, jurisdiction);
-    console.log(`Context search complete. Found context: ${context.length > 0}`);
+    // Use the site-specific RPC version
+    const queryEmbedding = await getEmbedding(message);
+    let context = "";
+    if (queryEmbedding) {
+      const { data: matches, error: rpcError } = await supabase.rpc('match_site_documents', {
+        query_embedding: queryEmbedding,
+        match_threshold: 0.5,
+        match_count: 5,
+        p_site: site,
+        p_context: jurisdiction || 'general'
+      });
+      if (!rpcError && matches) {
+        context = matches.map((m: any) => m.content).join('\n\n---\n\n');
+      }
+    }
       
     const hasPremiumTag = message.toLowerCase().includes("incorporate") || message.toLowerCase().includes("tax") || message.toLowerCase().includes("memo") || message.toLowerCase().includes("guide");
     
@@ -159,13 +155,14 @@ export const handler: Handler = async (event) => {
 
     return {
       statusCode: 200,
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({ response: responseText })
     };
   } catch (error: any) {
     console.error("Chat API Error:", error);
     return {
       statusCode: 500,
+      headers,
       body: JSON.stringify({ 
         error: "Failed to process chat request", 
         details: error.message || String(error)
