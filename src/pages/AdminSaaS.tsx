@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import { 
   Settings, 
   Key, 
@@ -43,6 +44,7 @@ interface Document {
 const API_BASE = '/api/admin';
 
 export default function AdminSaaS() {
+  useDocumentTitle('LexAI - SaaS Admin');
   const [adminKey, setAdminKey] = useState<string>(localStorage.getItem('lex_admin_key') || '');
   const [isAuth, setIsAuth] = useState(false);
   const [activeTab, setActiveTab] = useState<'settings' | 'keys' | 'docs' | 'playground'>('settings');
