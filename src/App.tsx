@@ -5,10 +5,6 @@ import { motion, AnimatePresence } from 'motion/react';
 import Navbar from './components/Navbar';
 import Footer from './components/Footer';
 import Home from './pages/Home';
-import AITraining from './pages/AITraining';
-import BarBeyond from './pages/BarBeyond';
-import NaijaLaws from './pages/NaijaLaws';
-import Opportunities from './pages/Opportunities';
 import About from './pages/About';
 import Contact from './pages/Contact';
 import Legal from './pages/Legal';
@@ -16,7 +12,6 @@ import LexAI from './pages/LexAI';
 import LexAIStandalone from './pages/LexAIStandalone';
 import AdminDashboard from './pages/AdminDashboard';
 import AdminSaaS from './pages/AdminSaaS';
-import ResourceStore from './pages/ResourceStore';
 import PageTransition from './components/PageTransition';
 import ScrollProgress from './components/ScrollProgress';
 
@@ -37,16 +32,11 @@ const AnimatedRoutes = () => {
         <Routes location={location}>
           <Route path="/lex-ai-embed" element={<LexAIStandalone />} />
           <Route path="/" element={<PageTransition><Home /></PageTransition>} />
-          <Route path="/ai-training" element={<PageTransition><AITraining /></PageTransition>} />
-          <Route path="/bar-beyond" element={<PageTransition><BarBeyond /></PageTransition>} />
-          <Route path="/naija-laws" element={<PageTransition><NaijaLaws /></PageTransition>} />
-          <Route path="/opportunities" element={<PageTransition><Opportunities /></PageTransition>} />
           <Route path="/about" element={<PageTransition><About /></PageTransition>} />
           <Route path="/contact" element={<PageTransition><Contact /></PageTransition>} />
           <Route path="/lex-ai" element={<PageTransition><LexAI /></PageTransition>} />
           <Route path="/admin" element={<PageTransition><AdminDashboard /></PageTransition>} />
           <Route path="/saas-admin" element={<PageTransition><AdminSaaS /></PageTransition>} />
-          <Route path="/resource-store" element={<PageTransition><ResourceStore /></PageTransition>} />
           <Route path="/:type" element={<PageTransition><Legal /></PageTransition>} />
         </Routes>
       </motion.div>

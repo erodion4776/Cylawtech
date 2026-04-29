@@ -20,9 +20,6 @@ const Navbar = () => {
   const navLinks = [
     { name: 'Home', path: '/' },
     { name: 'LexAI Playground', path: '/lex-ai' },
-    { name: 'AI Training', path: '/ai-training' },
-    { name: 'Bar & Beyond', path: '/bar-beyond' },
-    { name: 'Store', path: '/resource-store' },
     { name: 'About', path: '/about' },
     { name: 'Contact', path: '/contact' },
   ];
@@ -74,7 +71,7 @@ const Navbar = () => {
             whileTap={{ scale: 0.97 }}
           >
             <Link
-              to="/naija-laws"
+              to="/contact"
               className="bg-slate-900 text-white px-5 py-2.5 rounded-full text-sm font-semibold hover:bg-slate-800 transition-all shadow-md hover:shadow-xl"
             >
               Join the Waitlist
@@ -132,7 +129,7 @@ const Navbar = () => {
               transition={{ delay: 0.6 }}
             >
               <Link
-                to="/naija-laws"
+                to="/contact"
                 className="bg-slate-900 text-white px-6 py-4 rounded-2xl text-center font-bold mt-4 block shadow-lg"
                 onClick={() => setIsOpen(false)}
               >

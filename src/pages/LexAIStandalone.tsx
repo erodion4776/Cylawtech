@@ -63,7 +63,7 @@ const LexAIStandalone = () => {
         suggestedResource = {
           title: "Legal Drafting Guide",
           price: "$49.99",
-          link: "https://cylawtech.netlify.app/resource-store"
+          link: "https://lexai.pro/contact"
         };
       }
 
