@@ -8,6 +8,26 @@
   port = 8888
 
 [[redirects]]
+  from = "/api/admin/*"
+  to = "/.netlify/functions/admin/:splat"
+  status = 200
+
+[[redirects]]
+  from = "/api/chat"
+  to = "/.netlify/functions/chat"
+  status = 200
+
+[[redirects]]
+  from = "/api/embed"
+  to = "/.netlify/functions/embed"
+  status = 200
+
+[[redirects]]
+  from = "/api/grade"
+  to = "/.netlify/functions/grade"
+  status = 200
+
+[[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/:splat"
   status = 200
