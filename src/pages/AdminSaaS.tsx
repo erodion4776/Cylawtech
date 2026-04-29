@@ -45,11 +45,13 @@ const API_BASE = '/api/admin';
 export default function AdminSaaS() {
   const [adminKey, setAdminKey] = useState<string>(localStorage.getItem('lex_admin_key') || '');
   const [isAuth, setIsAuth] = useState(false);
-  const [activeTab, setActiveTab] = useState<'settings' | 'keys' | 'docs'>('settings');
+  const [activeTab, setActiveTab] = useState<'settings' | 'keys' | 'docs' | 'playground'>('settings');
   const [settings, setSettings] = useState<Settings | null>(null);
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
   const [docs, setDocs] = useState<Document[]>([]);
   const [loading, setLoading] = useState(false);
+  const [testLoading, setTestLoading] = useState(false);
+  const [testResponse, setTestResponse] = useState<{status: number, data: any} | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
@@ -136,6 +138,32 @@ export default function AdminSaaS() {
       if (res.ok) fetchData();
     } catch (e) {
       setError("Failed to create key");
+    }
+  };
+
+  const handleRunAiTest = async (site: string, apiKey: string, message: string) => {
+    setTestLoading(true);
+    setTestResponse(null);
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey
+        },
+        body: JSON.stringify({
+          message,
+          site,
+          jurisdiction: 'general'
+        })
+      });
+      
+      const data = await res.json();
+      setTestResponse({ status: res.status, data });
+    } catch (err: any) {
+      setTestResponse({ status: 500, data: { error: err.message } });
+    } finally {
+      setTestLoading(false);
     }
   };
 
@@ -236,6 +264,7 @@ export default function AdminSaaS() {
             { id: 'settings', label: 'System Settings', icon: Settings },
             { id: 'keys', label: 'Client API Keys', icon: Key },
             { id: 'docs', label: 'Knowledge Base', icon: Database },
+            { id: 'playground', label: 'AI Playground', icon: Cpu },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -274,6 +303,7 @@ export default function AdminSaaS() {
               {activeTab === 'settings' && "System Control"}
               {activeTab === 'keys' && "Client Management"}
               {activeTab === 'docs' && "Knowledge Assets"}
+              {activeTab === 'playground' && "Network Playground"}
             </h2>
             <p className="text-slate-500 text-sm">
               Manage your decentralized AI network from a central interface
@@ -437,6 +467,104 @@ export default function AdminSaaS() {
                   </tbody>
                 </table>
               </div>
+            </motion.div>
+          )}
+
+          {activeTab === 'playground' && (
+            <motion.div 
+              key="playground"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              className="max-w-4xl"
+            >
+              <div className="bg-[#0c0c0c] border border-slate-900 p-8 rounded-2xl mb-8">
+                <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
+                  <Cpu className="w-5 h-5 text-blue-500" />
+                  Live API Diagnostics
+                </h3>
+                <p className="text-slate-400 text-sm mb-8">
+                  Test your network configuration and API keys. This sends a real request to your <code className="text-blue-400 bg-blue-400/10 px-1 rounded">/api/chat</code> endpoint.
+                </p>
+
+                <form 
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    const f = e.target as HTMLFormElement;
+                    const site = (f.elements.namedItem('site') as HTMLSelectElement).value;
+                    const key = (f.elements.namedItem('key') as HTMLSelectElement).value;
+                    const msg = (f.elements.namedItem('message') as HTMLTextAreaElement).value;
+                    handleRunAiTest(site, key, msg);
+                  }}
+                  className="space-y-6"
+                >
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                      <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">1. Select Target Site</label>
+                      <select name="site" required className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm focus:border-blue-500 outline-none">
+                        <option value="">Select a configured site...</option>
+                        {Array.from(new Set(apiKeys.map(k => k.site))).map(site => (
+                          <option key={site} value={site}>{site}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">2. Select API Key</label>
+                      <select name="key" required className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm focus:border-blue-500 outline-none">
+                        <option value="">Select an active key...</option>
+                        {apiKeys.filter(k => k.status === 'active').map(k => (
+                          <option key={k.id} value={k.key}>{k.site} - {k.key.substring(0, 10)}...</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">3. Test Message</label>
+                    <textarea 
+                      name="message"
+                      rows={3}
+                      placeholder="e.g. Hello, who are you?"
+                      required
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-sm focus:border-blue-500 outline-none resize-none"
+                    />
+                  </div>
+
+                  <button 
+                    disabled={testLoading}
+                    className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 rounded-xl shadow-lg transition-all active:scale-[0.98] disabled:opacity-50"
+                  >
+                    {testLoading ? "RUNNING NETWORK DIAGNOSTICS..." : "EXECUTE TEST REQUEST"}
+                  </button>
+                </form>
+              </div>
+
+              {testResponse && (
+                <motion.div 
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="bg-[#0c0c0c] border border-slate-900 rounded-2xl overflow-hidden shadow-2xl"
+                >
+                  <div className={`p-4 flex items-center justify-between border-b border-slate-900 ${
+                    testResponse.status === 200 ? 'bg-emerald-500/5' : 'bg-rose-500/5'
+                  }`}>
+                    <div className="flex items-center gap-3">
+                      <div className={`w-3 h-3 rounded-full ${testResponse.status === 200 ? 'bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]' : 'bg-rose-500'}`}></div>
+                      <span className="font-bold text-sm text-white">HTTP RESPONSE: {testResponse.status}</span>
+                    </div>
+                    {testResponse.status === 200 ? (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                    ) : (
+                      <AlertCircle className="w-4 h-4 text-rose-500" />
+                    )}
+                  </div>
+                  <div className="p-6 font-mono text-xs overflow-x-auto">
+                    <pre className="text-slate-300">
+                      {JSON.stringify(testResponse.data, null, 2)}
+                    </pre>
+                  </div>
+                </motion.div>
+              )}
             </motion.div>
           )}
 
