@@ -436,6 +436,83 @@ export default function AdminSaaS() {
                  ))}
                </div>
 
+               {/* New Upload Section */}
+               <div className="bg-[#0c0c0c] border border-slate-900 p-8 rounded-2xl mb-10">
+                 <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
+                   <Plus className="w-5 h-5 text-blue-500" />
+                   Upload Knowledge Base
+                 </h3>
+                 <form 
+                  className="grid grid-cols-1 md:grid-cols-4 gap-4"
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    const form = e.target as HTMLFormElement;
+                    const fileInput = form.elements.namedItem('file') as HTMLInputElement;
+                    const siteInput = form.elements.namedItem('site') as HTMLInputElement;
+                    const contextInput = form.elements.namedItem('context') as HTMLInputElement;
+                    
+                    if (!fileInput.files?.[0]) return alert("Select a file");
+                    
+                    setLoading(true);
+                    const file = fileInput.files[0];
+                    const reader = new FileReader();
+                    reader.onload = async () => {
+                      const base64 = (reader.result as string).split(',')[1];
+                      try {
+                        const res = await fetch('/api/embed', {
+                          method: 'POST',
+                          headers: { 
+                            'Content-Type': 'application/json',
+                            'x-admin-key': adminKey
+                          },
+                          body: JSON.stringify({
+                            fileBase64: base64,
+                            filename: file.name,
+                            site: siteInput.value || 'global',
+                            context: contextInput.value || 'general'
+                          })
+                        });
+                        if (res.ok) {
+                          alert("Knowledge indexed successfully!");
+                          fetchData();
+                          form.reset();
+                        }
+                      } catch (err) {
+                        alert("Upload failed");
+                      } finally {
+                        setLoading(false);
+                      }
+                    };
+                    reader.readAsDataURL(file);
+                  }}
+                 >
+                   <input 
+                    name="site" 
+                    placeholder="Site ID (e.g. client-a)"
+                    required
+                    className="bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm focus:border-blue-500 outline-none"
+                   />
+                   <input 
+                    name="context" 
+                    placeholder="Context (e.g. legal-docs)"
+                    className="bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm focus:border-blue-500 outline-none"
+                   />
+                   <input 
+                    type="file" 
+                    name="file" 
+                    accept=".txt,.pdf,.doc,.docx"
+                    className="bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs text-slate-500 file:mr-4 file:py-1 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-500"
+                   />
+                   <button 
+                    disabled={loading}
+                    type="submit"
+                    className="bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition-all disabled:opacity-50"
+                   >
+                     {loading ? "INDEXING..." : "UPLOAD & INDEX"}
+                   </button>
+                 </form>
+               </div>
+
                <div className="bg-[#0c0c0c] border border-slate-900 rounded-2xl">
                  <div className="p-6 border-b border-slate-900 flex justify-between items-center">
                     <h3 className="font-bold text-white">Document Registry</h3>
