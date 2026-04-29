@@ -2,6 +2,7 @@ import { Handler } from '@netlify/functions';
 import { createClient } from "@supabase/supabase-js";
 import { GoogleGenAI } from "@google/genai";
 import { HfInference } from "@huggingface/inference";
+import Groq from "groq-sdk";
 import pdfParser from "pdf-parse-debugging-disabled";
 import dotenv from "dotenv";
 
@@ -12,6 +13,7 @@ const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || 'dummy';
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY || 'dummy' });
 
 export const handler: Handler = async (event) => {
   const headers = {
@@ -174,12 +176,24 @@ export const handler: Handler = async (event) => {
             contents: ["Diagnostic test"]
           });
           if (res.embeddings && res.embeddings.length > 0) {
-            diagnostics.gemini = { status: 'ok', dimension: res.embeddings[0].values.length };
+            diagnostics.gemini = { status: 'ok', dimension: res.embeddings[0].values.slice(0, 768).length };
           } else {
             diagnostics.gemini = { status: 'error', error: 'No embedding returned' };
           }
         } catch (gemErr: any) {
           diagnostics.gemini = { status: 'error', error: gemErr.message };
+        }
+
+        // Test Groq
+        try {
+          if (process.env.GROQ_API_KEY) {
+            const list = await groq.models.list();
+            diagnostics.groq = { status: 'ok', models: list.data.length };
+          } else {
+            diagnostics.groq = { status: 'missing_key' };
+          }
+        } catch (groqErr: any) {
+          diagnostics.groq = { status: 'error', error: groqErr.message };
         }
 
         // Test Hugging Face

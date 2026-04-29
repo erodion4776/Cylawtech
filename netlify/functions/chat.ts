@@ -32,7 +32,7 @@ async function getEmbedding(text: string) {
       
       if (result.embeddings && result.embeddings.length > 0) {
         console.log("Gemini embedding generated successfully.");
-        return result.embeddings[0].values;
+        return result.embeddings[0].values.slice(0, 768);
       }
     } catch (gemError: any) {
       console.warn("Gemini Embedding (Chat) failed, trying fallback:", gemError.message);

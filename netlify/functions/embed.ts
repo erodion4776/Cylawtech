@@ -29,7 +29,7 @@ async function getEmbedding(text: string) {
       });
       
       if (result.embeddings && result.embeddings.length > 0) {
-        return result.embeddings[0].values;
+        return result.embeddings[0].values.slice(0, 768);
       }
     } catch (gemError: any) {
       console.warn("Gemini Embedding failed, trying fallback:", gemError.message);
