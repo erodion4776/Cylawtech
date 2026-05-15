@@ -39,11 +39,12 @@ export const generateAIResponse = async (prompt: string, contextDocs: string, mo
       });
       return completion.choices[0]?.message?.content || "";
     } else {
-      const result = await genAI.models.generateContent({
-        model: modelName,
-        contents: systemPrompt + "\n\nQuery: " + prompt
-      });
-      return result.text || "";
+      const model = genAI.getGenerativeModel({ model: modelName });
+      const result = await model.generateContent([
+        { text: systemPrompt },
+        { text: "Query: " + prompt }
+      ]);
+      return result.response.text();
     }
   } catch (error) {
     console.error("AI Generation error:", error);

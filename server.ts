@@ -68,8 +68,9 @@ async function startServer() {
       let processedCount = 0;
       for (const chunk of chunks) {
         try {
-          const result = await ai.models.embedContent({ model, contents: chunk });
-          const embedding = result.embeddings && result.embeddings.length > 0 ? result.embeddings[0].values : null;
+          const embModel = ai.getGenerativeModel({ model });
+          const result = await embModel.embedContent(chunk);
+          const embedding = result.embedding?.values || null;
 
           if (embedding) {
             const { error } = await supabase.from('documents').insert({

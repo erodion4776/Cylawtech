@@ -40,10 +40,29 @@ export const getRelevantDocs = async (message: string, context: string, site: st
       console.log("No site-specific or global matches, trying generic search...");
       const { data: genericMatches } = await supabase.rpc('match_documents', {
         query_embedding: embedding,
-        match_threshold: 0.1,
+        match_threshold: 0.05, 
         match_count: 5
       });
       if (genericMatches && genericMatches.length > 0) results = genericMatches;
+    }
+
+    // FINAL FALLBACK: Keyword search if vector search yielded nothing
+    if (results.length === 0) {
+      console.log("Vector search failed, trying keyword fallback...");
+      const words = message.split(' ').filter(w => w.length > 4).slice(0, 3);
+      if (words.length > 0) {
+        const query = words.map(w => `%${w}%`).join(' '); // Simple approach
+        const { data: keywordMatches } = await supabase
+          .from('documents')
+          .select('id, content, metadata')
+          .or(`content.ilike.%${words[0]}%,content.ilike.%${words[1] || words[0]}%`)
+          .limit(3);
+        
+        if (keywordMatches && keywordMatches.length > 0) {
+          console.log(`Found ${keywordMatches.length} keyword matches`);
+          results = keywordMatches.map(d => ({ ...d, similarity: 0.5 }));
+        }
+      }
     }
 
     if (results.length > 0) {
