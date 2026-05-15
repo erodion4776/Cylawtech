@@ -35,17 +35,15 @@ export const getRelevantDocs = async (message: string, context: string, site: st
       if (normalizedMatches && normalizedMatches.length > 0) results = normalizedMatches;
     }
 
-    // Fallback 2: Try 'global' site
+    // Fallback 3: Generic search across all documents (no site filter)
     if (results.length === 0) {
-      console.log("No site-specific matches, trying global site...");
-      const { data: globalMatches } = await supabase.rpc('match_site_documents', {
+      console.log("No site-specific or global matches, trying generic search...");
+      const { data: genericMatches } = await supabase.rpc('match_documents', {
         query_embedding: embedding,
         match_threshold: 0.1,
-        match_count: 5,
-        p_site: 'global',
-        p_context: 'general'
+        match_count: 5
       });
-      if (globalMatches && globalMatches.length > 0) results = globalMatches;
+      if (genericMatches && genericMatches.length > 0) results = genericMatches;
     }
 
     if (results.length > 0) {

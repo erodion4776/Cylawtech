@@ -24,12 +24,12 @@ async function getEmbedding(text: string) {
   if (process.env.GEMINI_API_KEY) {
     try {
       const result = await ai.models.embedContent({
-        model: 'gemini-embedding-2-preview',
+        model: 'text-embedding-004',
         contents: [text]
       });
       
       if (result.embeddings && result.embeddings.length > 0) {
-        return result.embeddings[0].values.slice(0, 768);
+        return result.embeddings[0].values;
       }
     } catch (gemError: any) {
       console.warn("Gemini Embedding failed, trying fallback:", gemError.message);
@@ -157,8 +157,8 @@ export const handler: Handler = async (event) => {
     const startTime = Date.now();
 
     for (let i = 0; i < chunks.length; i++) {
-      // Check if we approach the 10s Netlify timeout (stop at 8.0 seconds to be safe)
-      if (Date.now() - startTime > 8000) {
+      // Check if we approach the Netlify timeout limit (stop at 20 seconds to be safe in more generous environments, or 8s for standard)
+      if (Date.now() - startTime > 22000) {
         console.warn('Approaching Netlify timeout limit. Stopping early.');
         break;
       }

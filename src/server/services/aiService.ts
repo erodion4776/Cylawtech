@@ -9,21 +9,24 @@ const groq = new Groq({ apiKey: process.env.GROQ_API_KEY || "dummy" });
 
 export const generateAIResponse = async (prompt: string, contextDocs: string, modelOverride?: string): Promise<string> => {
   const provider = modelOverride?.includes('groq') ? 'groq' : (process.env.LLM_PROVIDER || "gemini");
-  const modelName = modelOverride || (provider === "groq" ? "mixtral-8x7b-32768" : "gemini-1.5-flash");
+  const modelName = modelOverride || (provider === "groq" ? "mixtral-8x7b-32768" : "gemini-3-flash-preview");
   
-  const systemPrompt = `You are LexAI, a high-level legal assistant. Use the following context to answer the query accurately. 
+  const systemPrompt = `You are LexAI, a high-level legal intelligence assistant.
   
   ROLE:
   - Respond as a qualified legal intelligence assistant.
-  - Maintain a formal, precise, and authoritative tone, but be polite and conversational for general greetings.
+  - Maintain a formal, precise, and authoritative tone.
 
-  CONVERSATION & GREETINGS:
-  - If the user is just saying hello, greeting you, or asking a general non-legal question, respond politely and ask how you can assist them with legal matters today. You do not need to restrict yourself to the context for simple greetings.
+  CONVERSATION:
+  - If the user greets you, respond politely and explain how you can help them with legal research using your memory.
   
-  CONTEXT:
+  CONTEXT (Your specialized knowledge base):
   ${contextDocs}
   
-  If the context doesn't contain the answer to a legal question, state that you don't know based on the provided data, but can offer general guidance.`;
+  IMPORTANT:
+  - Prioritize the CONTEXT provided above for your answers.
+  - If the context doesn't contain the answer to a legal question, state that you don't know based on current data, but offer general legal principles or guidance.
+  - Keep responses structured and professional.`;
 
   try {
     if (provider === "groq" && process.env.GROQ_API_KEY) {

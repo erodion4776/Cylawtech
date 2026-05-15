@@ -898,7 +898,7 @@ export default function AdminSaaS() {
                             <tr key={doc.id} className="hover:bg-slate-900/50 group">
                               <td className="p-4 align-top">
                                 <span className="px-2 py-1 bg-slate-950 border border-slate-800 rounded text-[10px] font-bold text-blue-400">
-                                  {(doc.site || 'N/A').toUpperCase()}
+                                  {(doc.site || (doc as any).metadata?.site || 'N/A').toUpperCase()}
                                 </span>
                               </td>
                               <td className="p-4">
