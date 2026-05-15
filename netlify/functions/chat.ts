@@ -26,13 +26,13 @@ async function getEmbedding(text: string) {
     try {
       console.log(`Generating embedding for text: ${text.substring(0, 50)}...`);
       const result = await ai.models.embedContent({
-        model: "gemini-embedding-2-preview",
+        model: "text-embedding-004",
         contents: [text]
       });
       
       if (result.embeddings && result.embeddings.length > 0) {
         console.log("Gemini embedding generated successfully.");
-        return result.embeddings[0].values.slice(0, 768);
+        return result.embeddings[0].values;
       }
     } catch (gemError: any) {
       console.warn("Gemini Embedding (Chat) failed, trying fallback:", gemError.message);

@@ -57,27 +57,41 @@ async function startServer() {
       const pdf = (await import("pdf-parse-debugging-disabled")).default;
       const data = await pdf(buffer);
       const text = data.text;
+      
+      console.log(`Parsing PDF: ${filename}, extracted ${text.length} characters`);
+      
       const chunks = text.split('\n\n').filter((p: string) => p.trim().length > 100);
+      console.log(`Split into ${chunks.length} chunks over 100 chars`);
 
       const model = "text-embedding-004";
 
       let processedCount = 0;
       for (const chunk of chunks) {
-        const result = await ai.models.embedContent({ model, contents: chunk });
-        const embedding = result.embeddings && result.embeddings.length > 0 ? result.embeddings[0].values : null;
+        try {
+          const result = await ai.models.embedContent({ model, contents: chunk });
+          const embedding = result.embeddings && result.embeddings.length > 0 ? result.embeddings[0].values : null;
 
-        if (embedding) {
-          const { error } = await supabase.from('documents').insert({
-            content: chunk,
-            embedding,
-            site: site || 'global',
-            context: context || 'general',
-            metadata: { jurisdiction, difficulty, productTag, original_filename: filename, site, context }
-          });
-          if (!error) processedCount++;
+          if (embedding) {
+            const { error } = await supabase.from('documents').insert({
+              content: chunk,
+              embedding,
+              site: site || 'global',
+              context: context || 'general',
+              metadata: { jurisdiction, difficulty, productTag, original_filename: filename, site, context }
+            });
+            if (!error) processedCount++;
+            else console.error("Supabase insert error:", error);
+          }
+        } catch (embErr: any) {
+          console.error(`Embedding chunk failed: ${embErr.message}`);
         }
       }
-      res.json({ message: `Processed ${processedCount} of ${chunks.length} chunks` });
+      console.log(`Successfully indexed ${processedCount} chunks`);
+      res.json({ 
+        message: `Processed ${processedCount} of ${chunks.length} chunks`,
+        chunksFound: chunks.length,
+        chunksIndexed: processedCount
+      });
     } catch (error: any) {
       res.status(500).json({ error: "Embedding failed", details: error.message });
     }

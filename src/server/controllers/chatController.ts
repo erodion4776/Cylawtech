@@ -4,7 +4,7 @@ import { generateAIResponse } from "../services/aiService.ts";
 import { supabase } from "../config/supabase.ts";
 
 export const handleChat = async (req: Request, res: Response) => {
-  const { message, context, site } = req.body;
+  const { message, context, site, jurisdiction } = req.body;
   const apiKey = req.headers['x-api-key'];
 
   if (!message) {
@@ -13,6 +13,7 @@ export const handleChat = async (req: Request, res: Response) => {
 
   const isInternal = !apiKey;
   const targetSite = site || 'lexai';
+  const targetContext = context || jurisdiction || 'general';
 
   if (!isInternal && !site) {
     return res.status(400).json({ error: "Site identifier is required" });
@@ -34,7 +35,7 @@ export const handleChat = async (req: Request, res: Response) => {
     }
 
     // 1. Get relevant documents (RAG)
-    const relevantDocs = await getRelevantDocs(message, context || "general", targetSite);
+    const relevantDocs = await getRelevantDocs(message, targetContext, targetSite);
 
     // 2. Generate AI reply
     // Use the model configured in settings if provided
