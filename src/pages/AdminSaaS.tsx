@@ -786,7 +786,8 @@ export default function AdminSaaS() {
                  >
                    <input 
                     name="site" 
-                    placeholder="Site ID (e.g. client-a)"
+                    defaultValue="lexai"
+                    placeholder="Site ID (e.g. lexai)"
                     required
                     className="bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm focus:border-blue-500 outline-none"
                    />

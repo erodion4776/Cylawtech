@@ -11,8 +11,11 @@ export const getEmbedding = async (text: string): Promise<number[] | null> => {
   try {
     // Prefer Gemini for embedding if key is available
     if (process.env.GEMINI_API_KEY) {
-      const result = await genAI.getGenerativeModel({ model: "text-embedding-004" }).embedContent(text);
-      return result.embedding?.values || null;
+      const result = await genAI.models.embedContent({
+        model: "text-embedding-004",
+        contents: [text]
+      });
+      return result.embeddings && result.embeddings.length > 0 ? result.embeddings[0].values : null;
     } 
     
     // Fallback to Hugging Face

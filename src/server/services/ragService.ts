@@ -9,7 +9,8 @@ export const getRelevantDocs = async (message: string, context: string, site: st
       return "";
     }
 
-    console.log(`Searching for docs: site=${site}, context=${context}`);
+    console.log(`[RAG BRIDGE] Searching for docs: site=${site}, context=${context}`);
+    let results: any[] = [];
 
     // Try site-specific RPC first
     const { data: siteMatches, error: siteError } = await supabase.rpc('match_site_documents', {
@@ -20,38 +21,90 @@ export const getRelevantDocs = async (message: string, context: string, site: st
       p_context: context
     });
 
-    let results = siteMatches || [];
+    if (siteMatches && siteMatches.length > 0) {
+      console.log(`[RAG BRIDGE] Found ${siteMatches.length} site-specific matches.`);
+      results = siteMatches;
+    } else {
+      console.log(`[RAG BRIDGE] No site-specific matches. Trying fallbacks...`);
+      
+      // Fallback 1: Try Case-Insensitive / Normalized context
+      const normalizedContext = context.charAt(0).toUpperCase() + context.slice(1).toLowerCase();
+      if (normalizedContext !== context) {
+        const { data: normalizedMatches } = await supabase.rpc('match_site_documents', {
+          query_embedding: embedding,
+          match_threshold: 0.1,
+          match_count: 5,
+          p_site: site,
+          p_context: normalizedContext
+        });
+        if (normalizedMatches && normalizedMatches.length > 0) {
+          console.log(`[RAG BRIDGE] Found ${normalizedMatches.length} normalized context matches.`);
+          results = [...results, ...normalizedMatches];
+        }
+      }
 
-    // Fallback 1: Try Case-Insensitive / Normalized context if siteMatches is empty
-    if (results.length === 0 && !siteError) {
-      console.log("No exact matches, trying normalized context...");
-      const { data: normalizedMatches } = await supabase.rpc('match_site_documents', {
-        query_embedding: embedding,
-        match_threshold: 0.1,
-        match_count: 5,
-        p_site: site,
-        p_context: context.charAt(0).toUpperCase() + context.slice(1).toLowerCase() // Try 'Nigeria' for 'nigeria'
-      });
-      if (normalizedMatches && normalizedMatches.length > 0) results = normalizedMatches;
-    }
+      // Fallback 1.5: Try site-specific matches REGARDLESS of context
+      if (results.length === 0) {
+        console.log(`[RAG BRIDGE] No context match for site ${site}. Trying site-wide match...`);
+        const { data: siteWideMatches } = await supabase.rpc('match_site_documents', {
+          query_embedding: embedding,
+          match_threshold: 0.1,
+          match_count: 5,
+          p_site: site,
+          p_context: '' // This might not work if RPC expects exact match, let's try calling match_documents with site filter
+        });
 
-    // Fallback 3: Generic search across all documents (no site filter)
-    if (results.length === 0) {
-      console.log("No site-specific or global matches, trying generic search...");
-      const { data: genericMatches } = await supabase.rpc('match_documents', {
-        query_embedding: embedding,
-        match_threshold: 0.05, 
-        match_count: 5
-      });
-      if (genericMatches && genericMatches.length > 0) results = genericMatches;
+        if (siteWideMatches && siteWideMatches.length > 0) {
+          results = siteWideMatches;
+        } else {
+          // Alternative site-wide via match_documents with context ignore
+          const { data: alternateSiteMatches } = await supabase.rpc('match_documents', {
+            query_embedding: embedding,
+            match_threshold: 0.1,
+            match_count: 5,
+            filter: { site }
+          });
+          if (alternateSiteMatches && alternateSiteMatches.length > 0) {
+            results = alternateSiteMatches;
+          }
+        }
+      }
+
+      // Fallback 2: Try 'global' site if we didn't find anything
+      if (results.length === 0) {
+        const { data: globalMatches } = await supabase.rpc('match_site_documents', {
+          query_embedding: embedding,
+          match_threshold: 0.1,
+          match_count: 5,
+          p_site: 'global',
+          p_context: 'general'
+        });
+        if (globalMatches && globalMatches.length > 0) {
+          console.log(`[RAG BRIDGE] Found ${globalMatches.length} global site matches.`);
+          results = globalMatches;
+        }
+      }
+
+      // Fallback 3: Generic search across all documents (no site filter)
+      if (results.length === 0) {
+        console.log(`[RAG BRIDGE] Trying generic search across all documents...`);
+        const { data: genericMatches } = await supabase.rpc('match_documents', {
+          query_embedding: embedding,
+          match_threshold: 0.01, // Extremely low threshold for final vector attempt
+          match_count: 5
+        });
+        if (genericMatches && genericMatches.length > 0) {
+          console.log(`[RAG BRIDGE] Found ${genericMatches.length} generic matches.`);
+          results = genericMatches;
+        }
+      }
     }
 
     // FINAL FALLBACK: Keyword search if vector search yielded nothing
     if (results.length === 0) {
-      console.log("Vector search failed, trying keyword fallback...");
+      console.log(`[RAG BRIDGE] Vector search failed completely. Trying keyword fallback...`);
       const words = message.split(' ').filter(w => w.length > 4).slice(0, 3);
       if (words.length > 0) {
-        const query = words.map(w => `%${w}%`).join(' '); // Simple approach
         const { data: keywordMatches } = await supabase
           .from('documents')
           .select('id, content, metadata')
@@ -59,18 +112,19 @@ export const getRelevantDocs = async (message: string, context: string, site: st
           .limit(3);
         
         if (keywordMatches && keywordMatches.length > 0) {
-          console.log(`Found ${keywordMatches.length} keyword matches`);
+          console.log(`[RAG BRIDGE] Found ${keywordMatches.length} keyword matches.`);
           results = keywordMatches.map(d => ({ ...d, similarity: 0.5 }));
         }
       }
     }
 
     if (results.length > 0) {
-      console.log(`Found ${results.length} total relevant documents`);
-      return results.map((doc: any) => doc.content).join("\n---\n");
+      const uniqueDocs = Array.from(new Set(results.map(r => r.content)));
+      console.log(`[RAG BRIDGE] Returning ${uniqueDocs.length} unique docs to AI.`);
+      return uniqueDocs.join("\n---\n");
     }
 
-    console.log("No documents found after all fallbacks.");
+    console.warn("[RAG BRIDGE] No documents found after all search attempts.");
     return "";
   } catch (error) {
     console.error("RAG retrieval error:", error);
