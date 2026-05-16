@@ -124,19 +124,48 @@ export const handler: Handler = async (event) => {
       matchesFound: 0,
       matches: [] as any[]
     };
+
+    // 1. Try site-specific RPC first
+    let matches: any[] = [];
     if (queryEmbedding) {
-      const { data: matches, error: rpcError } = await supabase.rpc('match_site_documents', {
-        query_embedding: queryEmbedding,
-        match_threshold: 0.1,
-        match_count: 5,
-        p_site: targetSite,
-        p_context: jurisdiction || 'general'
+      console.log(`[CHAT FUNCTION] RPC call: match_site_documents. Site: ${targetSite}, Context: ${jurisdiction || 'general'}`);
+      const { data: siteMatches, error: rpcError } = await supabase.rpc('match_site_documents', {
+          query_embedding: queryEmbedding,
+          match_threshold: 0.1,
+          match_count: 5,
+          p_site: targetSite,
+          p_context: jurisdiction || 'general'
       });
-      if (!rpcError && matches) {
+      
+      if (rpcError) {
+          console.error(`[CHAT FUNCTION] Site-specific RPC error:`, rpcError);
+      }
+      
+      if (!rpcError && siteMatches && siteMatches.length > 0) {
+          matches = siteMatches;
+          console.log(`[CHAT FUNCTION] Found ${matches.length} matches for site ${targetSite}`);
+      } else {
+          console.log(`[CHAT FUNCTION] No matches for site ${targetSite}, trying 'global' fallback.`);
+          // 2. Try 'global' fallback
+          const { data: globalMatches, error: globalError } = await supabase.rpc('match_site_documents', {
+              query_embedding: queryEmbedding,
+              match_threshold: 0.1,
+              match_count: 5,
+              p_site: 'global',
+              p_context: 'general'
+          });
+          
+          if (!globalError && globalMatches && globalMatches.length > 0) {
+              matches = globalMatches;
+              console.log(`[CHAT FUNCTION] Found ${matches.length} matches using 'global' fallback.`);
+          }
+      }
+    }
+
+    if (matches.length > 0) {
         debugInfo.matchesFound = matches.length;
         debugInfo.matches = matches;
         context = matches.map((m: any) => m.content).join('\n\n---\n\n');
-      }
     }
       
     const hasPremiumTag = message.toLowerCase().includes("incorporate") || message.toLowerCase().includes("tax") || message.toLowerCase().includes("memo") || message.toLowerCase().includes("guide");

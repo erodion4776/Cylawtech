@@ -67,7 +67,7 @@ BEGIN
     1 - (d.embedding <=> query_embedding) AS similarity
   FROM documents d
   WHERE d.embedding IS NOT NULL
-    AND (d.site = p_site OR d.metadata->>'site' = p_site)
+    AND (d.site IN (p_site, 'global') OR d.metadata->>'site' IN (p_site, 'global'))
     AND (d.context = p_context OR d.metadata->>'context' = p_context)
     AND 1 - (d.embedding <=> query_embedding) > match_threshold
   ORDER BY d.embedding <=> query_embedding
