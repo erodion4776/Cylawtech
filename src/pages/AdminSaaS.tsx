@@ -653,14 +653,21 @@ export default function AdminSaaS() {
                         status: res.status,
                         data: {
                           ...data,
-                          history: [...(prev?.data?.history || []), { role: 'ai', content: data.response || data.error }]
+                          history: [...(prev?.data?.history || []), { 
+                            role: 'ai', 
+                            content: data.response || data.error,
+                            debugInfo: data.debugInfo 
+                          }]
                         }
                       }));
                     } catch (err: any) {
                       setTestResponse((prev: any) => ({
                         status: 500,
                         data: {
-                          history: [...(prev?.data?.history || []), { role: 'ai', content: `Error: ${err.message}` }]
+                          history: [...(prev?.data?.history || []), { 
+                            role: 'ai', 
+                            content: `Error: ${err.message}` 
+                          }]
                         }
                       }));
                     } finally {

@@ -103,9 +103,12 @@ const LexAI = () => {
 
       setChatHistory(prev => [...prev, { role: 'ai', content: data.response, suggestedResource, debugInfo: data.debugInfo }]);
     } catch (error: any) {
-      console.error(error);
+      console.error("DEBUG: Error caught in LexAI.tsx:", error);
+      console.error("DEBUG: Error debugInfo:", error.debugInfo);
+      
       const errorMsg = error.message || "I'm having trouble connecting to my knowledge base. Please try again.";
-      const debugInfo = error.debugInfo;
+      const debugInfo = error.debugInfo || { note: "No debug info provided in error response", rawError: errorMsg };
+      
       setChatHistory(prev => [...prev, { 
         role: 'ai', 
         content: `**Error:** ${errorMsg}`, 

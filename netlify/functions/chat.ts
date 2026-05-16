@@ -302,6 +302,7 @@ ${message}
     }
 
     if (!responseText) {
+       console.error("No responseText found. Returning error. debugInfo:", JSON.stringify(debugInfo));
        return {
          statusCode: 500,
          headers,
@@ -325,7 +326,8 @@ ${message}
       headers,
       body: JSON.stringify({ 
         error: "Failed to process chat request", 
-        details: error.message || String(error)
+        details: error.message || String(error),
+        debugInfo: { error: "General chat error" } 
       })
     };
   }
