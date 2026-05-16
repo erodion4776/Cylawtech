@@ -28,7 +28,7 @@ const LexAI = () => {
 
   // Chat State
   const [chatMessage, setChatMessage] = useState('');
-  const [chatHistory, setChatHistory] = useState<{role: 'user' | 'ai', content: string, suggestedResource?: any}[]>([
+  const [chatHistory, setChatHistory] = useState<{role: 'user' | 'ai', content: string, suggestedResource?: any, debugInfo?: any}[]>([
     { 
       role: 'ai', 
       content: "Welcome to your LexAI Workspace. I'm your legal intelligence partner. I've set our focus to **Nigerian Law** and **Prep Mode**. How can I help you today?" 
@@ -97,7 +97,7 @@ const LexAI = () => {
         };
       }
 
-      setChatHistory(prev => [...prev, { role: 'ai', content: data.response, suggestedResource }]);
+      setChatHistory(prev => [...prev, { role: 'ai', content: data.response, suggestedResource, debugInfo: data.debugInfo }]);
     } catch (error: any) {
       console.error(error);
       const errorMsg = error.message || "I'm having trouble connecting to my knowledge base. Please try again.";
@@ -251,6 +251,16 @@ const LexAI = () => {
                   {msg.role === 'ai' ? (
                     <div className="prose prose-sm max-w-none prose-slate">
                       <Markdown>{msg.content}</Markdown>
+                      {msg.debugInfo && (
+                        <div className="mt-4 p-3 bg-slate-100 rounded-lg text-[10px] text-slate-600 font-mono">
+                          <p><strong>Debug Info:</strong></p>
+                          <p>Embedding Generated: {msg.debugInfo.queryEmbeddingGenerated ? 'Yes' : 'No'}</p>
+                          <p>Matches: {msg.debugInfo.matchesFound}</p>
+                          {msg.debugInfo.matches?.map((m: any, mi: number) => (
+                            <p key={mi}>Match {mi+1}: {JSON.stringify(m.metadata || m.content?.substring(0, 50))}</p>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <p>{msg.content}</p>

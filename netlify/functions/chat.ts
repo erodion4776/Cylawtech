@@ -116,6 +116,11 @@ export const handler: Handler = async (event) => {
     // Use the site-specific RPC version
     const queryEmbedding = await getEmbedding(message);
     let context = "";
+    let debugInfo = {
+      queryEmbeddingGenerated: !!queryEmbedding,
+      matchesFound: 0,
+      matches: [] as any[]
+    };
     if (queryEmbedding) {
       const { data: matches, error: rpcError } = await supabase.rpc('match_site_documents', {
         query_embedding: queryEmbedding,
@@ -125,6 +130,8 @@ export const handler: Handler = async (event) => {
         p_context: jurisdiction || 'general'
       });
       if (!rpcError && matches) {
+        debugInfo.matchesFound = matches.length;
+        debugInfo.matches = matches;
         context = matches.map((m: any) => m.content).join('\n\n---\n\n');
       }
     }
@@ -305,7 +312,7 @@ ${message}
     return {
       statusCode: 200,
       headers,
-      body: JSON.stringify({ response: responseText })
+      body: JSON.stringify({ response: responseText, debugInfo })
     };
   } catch (error: any) {
     console.error("Chat API Error:", error);
