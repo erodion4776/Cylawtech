@@ -125,46 +125,25 @@ export const handler: Handler = async (event) => {
       matches: [] as any[]
     };
 
-    // Inspect documents (Diagnostic)
-    const { data: dbDebug, error: dbError } = await supabase.from('documents').select('site, context').limit(10);
-    debugInfo.dbSample = dbDebug;
-    debugInfo.dbError = dbError;
-    console.log("[CHAT DIAGNOSTICS] DB sample:", JSON.stringify(dbDebug));
-
-    // 1. Try site-specific RPC first
+    // 1. Try search across all documents
     let matches: any[] = [];
     if (queryEmbedding) {
-      console.log(`[CHAT FUNCTION] RPC call: match_site_documents. Site: ${targetSite}, Context: ${jurisdiction || 'general'}`);
-      const { data: siteMatches, error: rpcError } = await supabase.rpc('match_site_documents', {
+      console.log(`[CHAT FUNCTION] RPC call: match_site_documents. Site: all, Context: ""`);
+      const { data: allMatches, error: rpcError } = await supabase.rpc('match_site_documents', {
           query_embedding: queryEmbedding,
-          match_threshold: 0.1,
-          match_count: 5,
-          p_site: targetSite,
-          p_context: jurisdiction || ''
+          match_threshold: 0.01,
+          match_count: 10,
+          p_site: 'all',
+          p_context: ''
       });
       
       if (rpcError) {
-          console.error(`[CHAT FUNCTION] Site-specific RPC error:`, rpcError);
+          console.error(`[CHAT FUNCTION] RPC error:`, rpcError);
       }
       
-      if (!rpcError && siteMatches && siteMatches.length > 0) {
-          matches = siteMatches;
-          console.log(`[CHAT FUNCTION] Found ${matches.length} matches for site ${targetSite}`);
-      } else {
-          console.log(`[CHAT FUNCTION] No matches for site ${targetSite}, trying 'global' fallback.`);
-          // 2. Try 'global' fallback
-          const { data: globalMatches, error: globalError } = await supabase.rpc('match_site_documents', {
-              query_embedding: queryEmbedding,
-              match_threshold: 0.01,
-              match_count: 10,
-              p_site: 'global',
-              p_context: ''
-          });
-          
-          if (!globalError && globalMatches && globalMatches.length > 0) {
-              matches = globalMatches;
-              console.log(`[CHAT FUNCTION] Found ${matches.length} matches using 'global' fallback.`);
-          }
+      if (!rpcError && allMatches && allMatches.length > 0) {
+          matches = allMatches;
+          console.log(`[CHAT FUNCTION] Found ${matches.length} matches across all sites`);
       }
     }
 
