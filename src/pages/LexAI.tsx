@@ -76,6 +76,7 @@ const LexAI = () => {
         })
       });
       const data = await res.json();
+      console.log("Chat response data:", JSON.stringify(data));
       
       if (data.error) {
         throw new Error(data.error);

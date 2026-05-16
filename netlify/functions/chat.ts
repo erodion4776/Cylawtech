@@ -115,6 +115,9 @@ export const handler: Handler = async (event) => {
     // 1. Get relevant documents
     // Use the site-specific RPC version
     const queryEmbedding = await getEmbedding(message);
+    if (!queryEmbedding) {
+      console.warn("[CHAT FUNCTION] Could not generate embedding, check API keys.");
+    }
     let context = "";
     let debugInfo = {
       queryEmbeddingGenerated: !!queryEmbedding,

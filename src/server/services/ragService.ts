@@ -6,7 +6,7 @@ export const getRelevantDocs = async (message: string, context: string, site: st
     const embedding = await getEmbedding(message);
     if (!embedding) {
       console.warn("Could not generate embedding for message");
-      return "";
+      return { context: "", debugInfo: { error: "Embedding failed" } };
     }
 
     console.log(`[RAG BRIDGE] Searching for docs: site='${site}', context='${context}'`);
@@ -15,7 +15,7 @@ export const getRelevantDocs = async (message: string, context: string, site: st
     // Validate embedding existence
     if (!embedding || embedding.length === 0) {
       console.warn("[RAG BRIDGE] Embedding is null or empty. Search aborted.");
-      return "";
+      return { context: "", debugInfo: { error: "Embedding empty" } };
     }
 
     // Try site-specific RPC first
