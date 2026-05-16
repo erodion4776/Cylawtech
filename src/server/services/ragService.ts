@@ -21,8 +21,8 @@ export const getRelevantDocs = async (message: string, context: string, site: st
     // Try site-specific RPC first
     const { data: siteMatches, error: siteError } = await supabase.rpc('match_site_documents', {
       query_embedding: embedding,
-      match_threshold: 0.1, 
-      match_count: 5,
+      match_threshold: 0.01, 
+      match_count: 10,
       p_site: site,
       p_context: context
     });
@@ -127,6 +127,7 @@ export const getRelevantDocs = async (message: string, context: string, site: st
     if (results.length > 0) {
       const uniqueDocs = Array.from(new Set(results.map(r => r.content)));
       console.log(`[RAG BRIDGE] Returning ${uniqueDocs.length} unique docs to AI.`);
+      console.log(`[RAG BRIDGE] Documents metadata: ${JSON.stringify(results.map(r => ({site: r.site, context: r.context})))}`);
       return uniqueDocs.join("\n---\n");
     }
 

@@ -119,7 +119,7 @@ export const handler: Handler = async (event) => {
     if (queryEmbedding) {
       const { data: matches, error: rpcError } = await supabase.rpc('match_site_documents', {
         query_embedding: queryEmbedding,
-        match_threshold: 0.5,
+        match_threshold: 0.1,
         match_count: 5,
         p_site: targetSite,
         p_context: jurisdiction || 'general'
