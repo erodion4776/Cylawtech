@@ -9,8 +9,14 @@ export const getRelevantDocs = async (message: string, context: string, site: st
       return "";
     }
 
-    console.log(`[RAG BRIDGE] Searching for docs: site=${site}, context=${context}`);
+    console.log(`[RAG BRIDGE] Searching for docs: site='${site}', context='${context}'`);
     let results: any[] = [];
+    
+    // Validate embedding existence
+    if (!embedding || embedding.length === 0) {
+      console.warn("[RAG BRIDGE] Embedding is null or empty. Search aborted.");
+      return "";
+    }
 
     // Try site-specific RPC first
     const { data: siteMatches, error: siteError } = await supabase.rpc('match_site_documents', {
