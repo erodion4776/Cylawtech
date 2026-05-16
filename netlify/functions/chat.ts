@@ -125,6 +125,12 @@ export const handler: Handler = async (event) => {
       matches: [] as any[]
     };
 
+    // Inspect documents (Diagnostic)
+    const { data: dbDebug, error: dbError } = await supabase.from('documents').select('site, context').limit(10);
+    debugInfo.dbSample = dbDebug;
+    debugInfo.dbError = dbError;
+    console.log("[CHAT DIAGNOSTICS] DB sample:", JSON.stringify(dbDebug));
+
     // 1. Try site-specific RPC first
     let matches: any[] = [];
     if (queryEmbedding) {
@@ -134,7 +140,7 @@ export const handler: Handler = async (event) => {
           match_threshold: 0.1,
           match_count: 5,
           p_site: targetSite,
-          p_context: jurisdiction || 'general'
+          p_context: jurisdiction || ''
       });
       
       if (rpcError) {
@@ -149,10 +155,10 @@ export const handler: Handler = async (event) => {
           // 2. Try 'global' fallback
           const { data: globalMatches, error: globalError } = await supabase.rpc('match_site_documents', {
               query_embedding: queryEmbedding,
-              match_threshold: 0.1,
-              match_count: 5,
+              match_threshold: 0.01,
+              match_count: 10,
               p_site: 'global',
-              p_context: 'general'
+              p_context: ''
           });
           
           if (!globalError && globalMatches && globalMatches.length > 0) {

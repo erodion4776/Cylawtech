@@ -48,7 +48,7 @@ CREATE OR REPLACE FUNCTION match_site_documents (
   match_threshold float,
   match_count int,
   p_site text,
-  p_context text DEFAULT 'general'
+  p_context text DEFAULT NULL
 )
 RETURNS TABLE (
   id bigint,
@@ -57,7 +57,7 @@ RETURNS TABLE (
   similarity float
 )
 LANGUAGE plpgsql
-AS $$
+AS $func$
 BEGIN
   RETURN QUERY
   SELECT
@@ -67,11 +67,11 @@ BEGIN
     1 - (d.embedding <=> query_embedding) AS similarity
   FROM documents d
   WHERE d.embedding IS NOT NULL
-    AND (d.site IN (p_site, 'global') OR d.metadata->>'site' IN (p_site, 'global'))
-    AND (d.context = p_context OR d.metadata->>'context' = p_context)
+    AND (d.site = p_site OR d.site = 'global')
+    AND (p_context IS NULL OR p_context = '' OR d.context = p_context)
     AND 1 - (d.embedding <=> query_embedding) > match_threshold
   ORDER BY d.embedding <=> query_embedding
   LIMIT match_count;
 END;
-$$;
+$func$;
 
