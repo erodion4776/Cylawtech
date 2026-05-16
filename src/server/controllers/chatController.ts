@@ -35,14 +35,14 @@ export const handleChat = async (req: Request, res: Response) => {
     }
 
     // 1. Get relevant documents (RAG)
-    const relevantDocs = await getRelevantDocs(message, targetContext, targetSite);
+    const { context: relevantDocs, debugInfo } = await getRelevantDocs(message, targetContext, targetSite);
 
     // 2. Generate AI reply
     // Use the model configured in settings if provided
     const activeModel = settingsRes.data.active_model;
     const response = await generateAIResponse(message, relevantDocs, activeModel);
 
-    res.json({ response });
+    res.json({ response, debugInfo });
   } catch (error: any) {
     console.error("Chat controller error:", error);
     res.status(500).json({ error: "Failed to process chat", details: error.message });

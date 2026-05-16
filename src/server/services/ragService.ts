@@ -127,14 +127,22 @@ export const getRelevantDocs = async (message: string, context: string, site: st
     if (results.length > 0) {
       const uniqueDocs = Array.from(new Set(results.map(r => r.content)));
       console.log(`[RAG BRIDGE] Returning ${uniqueDocs.length} unique docs to AI.`);
-      console.log(`[RAG BRIDGE] Documents metadata: ${JSON.stringify(results.map(r => ({site: r.site, context: r.context})))}`);
-      return uniqueDocs.join("\n---\n");
+      const debugInfo = {
+        matchesFound: results.length,
+        matches: results.map((r: any) => ({
+          site: r.site,
+          context: r.context,
+          similarity: r.similarity,
+          contentPreview: r.content?.substring(0, 50)
+        }))
+      };
+      return { context: uniqueDocs.join("\n---\n"), debugInfo };
     }
 
     console.warn("[RAG BRIDGE] No documents found after all search attempts.");
-    return "";
+    return { context: "", debugInfo: { matchesFound: 0 } };
   } catch (error) {
     console.error("RAG retrieval error:", error);
-    return "";
+    return { context: "", debugInfo: { error: "RAG error" } };
   }
 };

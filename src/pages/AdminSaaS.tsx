@@ -591,6 +591,14 @@ export default function AdminSaaS() {
                       <div key={i} className={`flex ${msg.role === 'ai' ? 'justify-start' : 'justify-end'}`}>
                         <div className={`p-4 rounded-xl max-w-[80%] ${msg.role === 'ai' ? 'bg-slate-900 text-white' : 'bg-blue-600 text-white'}`}>
                           {msg.content}
+                          {msg.debugInfo && (
+                            <div className="mt-2 p-2 bg-slate-950 rounded text-[10px] text-slate-400 font-mono">
+                              <p>Matches: {msg.debugInfo.matchesFound}</p>
+                              {msg.debugInfo.matches?.map((m: any, mi: number) => (
+                                <p key={mi}>{m.site}/{m.context}: {m.contentPreview}...</p>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       </div>
                     ))}
