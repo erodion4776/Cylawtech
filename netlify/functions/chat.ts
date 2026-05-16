@@ -307,7 +307,8 @@ ${message}
          headers,
          body: JSON.stringify({
            error: "All AI providers failed. Check your API keys in Netlify.",
-           report: report
+           report: report,
+           debugInfo
          })
        };
     }

@@ -79,7 +79,10 @@ const LexAI = () => {
       console.log("Chat response data:", JSON.stringify(data));
       
       if (data.error) {
-        throw new Error(data.error);
+        const error = new Error(data.error);
+        (error as any).debugInfo = data.debugInfo;
+        (error as any).report = data.report;
+        throw error;
       }
 
       if (!data.response) {
@@ -102,7 +105,12 @@ const LexAI = () => {
     } catch (error: any) {
       console.error(error);
       const errorMsg = error.message || "I'm having trouble connecting to my knowledge base. Please try again.";
-      setChatHistory(prev => [...prev, { role: 'ai', content: `**Error:** ${errorMsg}\n\nPlease try again.` }]);
+      const debugInfo = error.debugInfo;
+      setChatHistory(prev => [...prev, { 
+        role: 'ai', 
+        content: `**Error:** ${errorMsg}`, 
+        debugInfo 
+      }]);
     } finally {
       setIsChatting(false);
     }
