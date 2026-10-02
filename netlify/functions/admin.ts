@@ -1,251 +1,169 @@
-import { Handler } from '@netlify/functions';
-import { createClient } from "@supabase/supabase-js";
-import { GoogleGenAI } from "@google/genai";
-import { HfInference } from "@huggingface/inference";
-import Groq from "groq-sdk";
-import pdfParser from "pdf-parse-debugging-disabled";
-import dotenv from "dotenv";
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.8";
 
-dotenv.config();
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-admin-key",
+  "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
+  "Content-Type": "application/json",
+};
 
-const supabaseUrl = process.env.SUPABASE_URL || 'https://dummy.supabase.co';
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || 'dummy';
-const supabase = createClient(supabaseUrl, supabaseKey);
+const supabase = createClient(
+  Deno.env.get("SUPABASE_URL") || "",
+  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || ""
+);
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY || 'dummy' });
-
-export const handler: Handler = async (event) => {
-  const headers = {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Headers": "Content-Type, x-admin-key",
-    "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
-    "Content-Type": "application/json"
-  };
-
-  if (event.httpMethod === "OPTIONS") {
-    return { statusCode: 204, headers, body: "" };
+serve(async (req) => {
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
   }
-  
-  console.log(`Admin Request: ${event.httpMethod} ${event.path}`);
 
-  const adminKey = event.headers['x-admin-key'];
-  const expectedKey = process.env.ADMIN_KEY;
+  const adminKey = req.headers.get("x-admin-key");
+  const expectedKey = Deno.env.get("ADMIN_KEY");
 
   if (!expectedKey) {
-    console.error("ADMIN_KEY environment variable is NOT SET in Netlify.");
-    return { statusCode: 500, headers, body: JSON.stringify({ error: "Server misconfiguration: No admin key set" }) };
+    return new Response(JSON.stringify({ error: "Server misconfiguration: ADMIN_KEY not set in secrets." }), {
+      status: 500,
+      headers: corsHeaders,
+    });
   }
 
   if (adminKey !== expectedKey) {
-    console.warn(`Unauthorized admin access attempt. Provided key: ${adminKey?.substring(0, 4)}...`);
-    return { statusCode: 403, headers, body: JSON.stringify({ error: "Forbidden: Invalid Admin Key" }) };
+    return new Response(JSON.stringify({ error: "Forbidden: Invalid Admin Key" }), {
+      status: 403,
+      headers: corsHeaders,
+    });
   }
 
-  const fullPath = event.path;
-  // Extract the part after /admin/
-  let path = '';
-  if (fullPath.includes('/admin/')) {
-    path = fullPath.split('/admin/')[1] || '';
-  } else if (fullPath.endsWith('/admin')) {
-    path = '';
-  }
-  
-  // Remove trailing slashes and clean up
-  path = path.replace(/\/$/, '');
-  
-  const method = event.httpMethod;
+  const url = new URL(req.url);
+  const path = url.pathname.split("/admin/")[1] || "";
+  const method = req.method;
 
   try {
-    // GET settings
-    if (method === 'GET' && (path === 'settings' || path === '')) {
-      const { data, error } = await supabase.from('settings').select('*').single();
-      if (error) throw error;
-      return { statusCode: 200, headers, body: JSON.stringify(data) };
+    // ==========================================
+    // SETTINGS
+    // ==========================================
+    if (method === "GET" && (path === "settings" || path === "")) {
+      const { data } = await supabase.from("settings").select("*").single();
+      return new Response(JSON.stringify(data), { headers: corsHeaders });
     }
 
-    // PATCH settings
-    if (method === 'PATCH' && path === 'settings') {
-      const body = JSON.parse(event.body || '{}');
+    if (method === "PATCH" && path === "settings") {
+      const body = await req.json();
       const { data, error } = await supabase
-        .from('settings')
-        .update({ ...body, updated_at: new Date() })
-        .match({ id: body.id })
+        .from("settings")
+        .update({ ...body, updated_at: new Date().toISOString() })
+        .eq("id", body.id)
         .select()
         .single();
       if (error) throw error;
-      return { statusCode: 200, headers, body: JSON.stringify(data) };
+      return new Response(JSON.stringify(data), { headers: corsHeaders });
     }
 
-    // GET keys
-    if (method === 'GET' && path === 'keys') {
-      const { data, error } = await supabase.from('api_keys').select('*').order('created_at', { ascending: false });
-      if (error) throw error;
-      return { statusCode: 200, headers, body: JSON.stringify(data) };
-    }
-
-    // POST keys
-    if (method === 'POST' && path === 'keys') {
-      const { site } = JSON.parse(event.body || '{}');
-      const newKey = `lex_${Math.random().toString(36).substring(2)}${Math.random().toString(36).substring(2)}`;
+    // ==========================================
+    // CLIENT FIRM KEYS
+    // ==========================================
+    if (method === "GET" && path === "keys") {
       const { data, error } = await supabase
-        .from('api_keys')
-        .insert({ key: newKey, site, status: 'active' })
+        .from("api_keys")
+        .select("*")
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      return new Response(JSON.stringify(data || []), { headers: corsHeaders });
+    }
+
+    if (method === "POST" && path === "keys") {
+      const { site } = await req.json();
+      const key = `lex_${crypto.randomUUID().replace(/-/g, "")}`;
+      const { data, error } = await supabase
+        .from("api_keys")
+        .insert({ key, site, status: "active" })
         .select()
         .single();
       if (error) throw error;
-      return { statusCode: 200, headers, body: JSON.stringify(data) };
+      return new Response(JSON.stringify(data), { headers: corsHeaders });
     }
 
-    // DELETE keys/:id
-    if (method === 'DELETE' && path.startsWith('keys/')) {
-      const id = path.split('/')[1];
-      const { error } = await supabase.from('api_keys').update({ status: 'revoked' }).eq('id', id);
+    if (method === "DELETE" && path.startsWith("keys/")) {
+      const id = path.split("/")[1];
+      const { error } = await supabase.from("api_keys").update({ status: "revoked" }).eq("id", id);
       if (error) throw error;
-      return { statusCode: 200, headers, body: JSON.stringify({ message: "Key revoked" }) };
+      return new Response(JSON.stringify({ message: "Access revoked" }), { headers: corsHeaders });
     }
 
-    // GET documents
-    if (method === 'GET' && path === 'documents') {
-      const { data, error } = await supabase.from('documents').select('id, content, site, context, metadata').limit(100);
+    // ==========================================
+    // STATUTORY DOCUMENTS (KNOWLEDGE BASE)
+    // ==========================================
+    if (method === "GET" && path === "documents") {
+      const { data, error } = await supabase
+        .from("documents")
+        .select("id, title, content, site, context, metadata")
+        .order("created_at", { ascending: false })
+        .limit(100);
       if (error) throw error;
-      return { statusCode: 200, headers, body: JSON.stringify(data) };
+      return new Response(JSON.stringify(data || []), { headers: corsHeaders });
     }
 
-    // DELETE documents/:id
-    if (method === 'DELETE' && path.startsWith('documents/')) {
-      const id = path.split('/')[1];
-      const { error } = await supabase.from('documents').delete().eq('id', id);
-      if (error) throw error;
-      return { statusCode: 200, headers, body: JSON.stringify({ message: "Document deleted" }) };
-    }
+    // Direct Knowledge Ingestion (Instant Batch Insert in ~10ms)
+    if (method === "POST" && (path === "documents" || path === "embed")) {
+      const { text, site = "nigeria", context = "general", metadata = {} } = await req.json();
 
-    // GET test-db
-    if (method === 'GET' && path === 'test-db') {
-      const diagnostics: any = {
-        supabase: {
-          url: supabaseUrl.replace(/\/\/[^:]+:[^@]+@/, '//***:***@'),
-          status: 'unknown'
-        },
-        tables: {},
-        embedding_check: 'none'
-      };
-
-      try {
-        // Check documents table schema and count
-        const { count: docCount, error: docError } = await supabase.from('documents').select('*', { count: 'exact', head: true });
-        const { error: selectError } = await supabase.from('documents').select('id, content, embedding, site, context').limit(0);
-        
-        diagnostics.tables.documents = {
-          status: docError ? 'error' : 'ok',
-          count: docCount,
-          schema: selectError ? { status: 'missing_columns', error: selectError.message } : 'ok'
-        };
-        
-        // Check api_keys table
-        const { count: keyCount, error: keyError } = await supabase.from('api_keys').select('*', { count: 'exact', head: true });
-        diagnostics.tables.api_keys = keyError ? { status: 'error', error: keyError } : { status: 'ok', count: keyCount };
-
-        // Check Settings table
-        const { count: setCount, error: setError } = await supabase.from('settings').select('*', { count: 'exact', head: true });
-        diagnostics.tables.settings = setError ? { status: 'error', error: setError } : { status: 'ok', count: setCount };
-
-        // Test PDF Parser load
-        try {
-          let pdf: any = pdfParser;
-          if (typeof pdf !== 'function' && pdf && typeof (pdf as any).default === 'function') {
-            pdf = (pdf as any).default;
-          }
-          const loaded = typeof pdf === 'function';
-          diagnostics.pdf_parser = { 
-            status: 'ok', 
-            loaded, 
-            type: typeof pdfParser,
-            hasDefault: !!(pdfParser as any)?.default,
-            isFunction: typeof pdfParser === 'function'
-          };
-        } catch (pdfErr: any) {
-          diagnostics.pdf_parser = { status: 'error', error: pdfErr.message };
-        }
-
-        // Test Gemini Embedding
-        try {
-          const aiModel = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
-          const res = await aiModel.models.embedContent({
-            model: 'gemini-embedding-2-preview',
-            contents: ["Diagnostic test"]
-          });
-          if (res.embeddings && res.embeddings.length > 0) {
-            diagnostics.gemini = { status: 'ok', dimension: res.embeddings[0].values.slice(0, 768).length };
-          } else {
-            diagnostics.gemini = { status: 'error', error: 'No embedding returned' };
-          }
-        } catch (gemErr: any) {
-          diagnostics.gemini = { status: 'error', error: gemErr.message };
-        }
-
-        // Test Groq
-        try {
-          if (process.env.GROQ_API_KEY) {
-            const list = await groq.models.list();
-            diagnostics.groq = { status: 'ok', models: list.data.length };
-          } else {
-            diagnostics.groq = { status: 'missing_key' };
-          }
-        } catch (groqErr: any) {
-          diagnostics.groq = { status: 'error', error: groqErr.message };
-        }
-
-        // Test Hugging Face
-        try {
-          if (process.env.HF_TOKEN) {
-            const hfModel = new HfInference(process.env.HF_TOKEN);
-            const res = await hfModel.featureExtraction({
-              model: "sentence-transformers/all-mpnet-base-v2",
-              inputs: "Diagnostic test",
-            }) as number[];
-            diagnostics.huggingface = { status: 'ok', dimension: res.length };
-          } else {
-            diagnostics.huggingface = { status: 'missing_token' };
-          }
-        } catch (hfErr: any) {
-          diagnostics.huggingface = { status: 'error', error: hfErr.message };
-        }
-
-        // Test insertion of a dummy vector (768 dimensions)
-        const dummyVector = new Array(768).fill(0);
-        const { error: insertError } = await supabase.from('documents').insert({
-          content: 'DIAGNOSTIC_TEST_ENTRY_TO_DELETE',
-          embedding: dummyVector,
-          site: 'diagnostic',
-          context: 'test'
+      if (!text || typeof text !== "string" || text.trim().length < 5) {
+        return new Response(JSON.stringify({ error: "Please provide valid legal text." }), {
+          status: 400,
+          headers: corsHeaders,
         });
-
-        if (insertError) {
-          diagnostics.embedding_check = { 
-            status: 'failed', 
-            error: insertError.message, 
-            code: insertError.code,
-            hint: insertError.hint || 'Dimension mismatch? (Table might expect 1536)' 
-          };
-        } else {
-          diagnostics.embedding_check = { status: 'ok', message: '768-dimension vector accepted' };
-          // Cleanup
-          await supabase.from('documents').delete().eq('content', 'DIAGNOSTIC_TEST_ENTRY_TO_DELETE');
-        }
-
-        diagnostics.supabase.status = 'connected';
-      } catch (err: any) {
-        diagnostics.supabase.status = 'failed';
-        diagnostics.supabase.error = err.message;
       }
 
-      return { statusCode: 200, headers, body: JSON.stringify(diagnostics) };
+      const rawSections = text
+        .split(/\n\n+/)
+        .map((s: string) => s.trim())
+        .filter((s: string) => s.length > 5);
+
+      const records = rawSections.map((section: string) => {
+        const firstLine = section.split("\n")[0].trim();
+        const title = firstLine.length > 50 ? firstLine.substring(0, 50) + "..." : firstLine;
+        return {
+          title,
+          content: section,
+          site,
+          context,
+          metadata: {
+            ...metadata,
+            uploaded_at: new Date().toISOString(),
+          },
+        };
+      });
+
+      const { data, error } = await supabase.from("documents").insert(records).select("id");
+      if (error) throw error;
+
+      const count = data ? data.length : records.length;
+      return new Response(
+        JSON.stringify({
+          message: `Successfully indexed ${count} section(s) into the statutory library.`,
+          count,
+        }),
+        { headers: corsHeaders }
+      );
     }
 
-    return { statusCode: 404, headers, body: JSON.stringify({ error: "Endpoint not found", path }) };
+    if (method === "DELETE" && path.startsWith("documents/")) {
+      const id = path.split("/")[1];
+      const { error } = await supabase.from("documents").delete().eq("id", id);
+      if (error) throw error;
+      return new Response(JSON.stringify({ message: "Document removed" }), { headers: corsHeaders });
+    }
+
+    return new Response(JSON.stringify({ error: "Endpoint not found" }), {
+      status: 404,
+      headers: corsHeaders,
+    });
   } catch (error: any) {
-    console.error("Admin Function Error:", error);
-    return { statusCode: 500, headers, body: JSON.stringify({ error: error.message || "Internal Server Error" }) };
+    console.error("Admin Error:", error);
+    return new Response(JSON.stringify({ error: error.message || "Internal server error" }), {
+      status: 500,
+      headers: corsHeaders,
+    });
   }
-};
+});
