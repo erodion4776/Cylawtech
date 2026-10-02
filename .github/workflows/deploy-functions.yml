@@ -18,8 +18,15 @@ jobs:
       - name: Setup Supabase CLI
         uses: supabase/setup-cli@v1
         with:
-          version: 1.207.9 # Pinned stable version prevents rate-limit errors
+          version: 1.207.9
           github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Automatically initialize config if not found
+      - name: Ensure Supabase Config Exists
+        run: |
+          if [ ! -f supabase/config.toml ]; then
+            supabase init
+          fi
 
       - name: Deploy Chat Edge Function
         run: |
