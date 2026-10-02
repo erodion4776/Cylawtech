@@ -32,7 +32,7 @@ serve(async (req) => {
     const url = new URL(req.url);
     const action = url.searchParams.get("action") || "send";
 
-    // 1. Fetch Conversations List
+    // 1. Action: Get Conversations List
     if (action === "list") {
       try {
         const { data } = await supabase
@@ -46,7 +46,7 @@ serve(async (req) => {
       }
     }
 
-    // 2. Fetch Conversation History
+    // 2. Action: Get Conversation History
     if (action === "history") {
       try {
         const { conversation_id } = await req.json();
@@ -61,7 +61,7 @@ serve(async (req) => {
       }
     }
 
-    // 3. Delete Conversation
+    // 3. Action: Delete Conversation
     if (action === "delete") {
       try {
         const { conversation_id } = await req.json();
@@ -88,7 +88,7 @@ serve(async (req) => {
       });
     }
 
-    // Manage conversation session
+    // Manage conversation session safely
     let convId = conversation_id;
     try {
       if (!convId) {
@@ -138,44 +138,52 @@ GUIDELINES:
 - Reference relevant statutory provisions, principles, and case law where applicable.
 - Answer clearly, directly, and concisely.`;
 
-    // Active production models on Groq
-    const modelCandidates = [
-      "llama-3.1-8b-instant",
-      "llama3-8b-8192",
-      "gemma2-9b-it",
-      "mixtral-8x7b-32768"
-    ];
+    // Dynamic Discovery: Query Groq for models available on this API key
+    let targetModel = "llama-3.1-8b-instant";
+    try {
+      const modelsResponse = await groq.models.list();
+      const activeIds: string[] = modelsResponse.data.map((m: any) => m.id);
+      console.log("[GROQ AVAILABLE MODELS]:", activeIds.join(", "));
 
-    let reply = "";
-    let lastError: any = null;
+      // Order of preference among active models
+      const preferences = [
+        "llama-3.1-8b-instant",
+        "gemma2-9b-it",
+        "llama-3.2-3b-preview",
+        "llama-3.2-1b-preview",
+        "openai/gpt-oss-120b",
+        "openai/gpt-oss-20b",
+        "qwen/qwen3.8-27b"
+      ];
 
-    // Try candidates in order
-    for (const modelName of modelCandidates) {
-      try {
-        const completion = await groq.chat.completions.create({
-          model: modelName,
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: message },
-          ],
-          temperature: 0.2,
-          max_tokens: 1500,
-        });
-
-        reply = completion.choices[0]?.message?.content || "";
-        if (reply) {
-          console.log(`[AI SUCCESS] Response generated using: ${modelName}`);
-          break;
-        }
-      } catch (err: any) {
-        lastError = err;
-        console.warn(`[AI WARN] Model ${modelName} failed (${err.message}). Trying fallback candidate...`);
+      const match = preferences.find((p) => activeIds.includes(p));
+      if (match) {
+        targetModel = match;
+      } else {
+        // Fallback to the first available chat model
+        const validTextModel = activeIds.find(
+          (id) => !id.includes("whisper") && !id.includes("guard") && !id.includes("embed")
+        );
+        if (validTextModel) targetModel = validTextModel;
       }
+    } catch (discoveryErr: any) {
+      console.warn("[MODEL DISCOVERY WARNING]:", discoveryErr.message);
+      targetModel = "llama-3.1-8b-instant";
     }
 
-    if (!reply) {
-      throw lastError || new Error("All Groq model candidates failed.");
-    }
+    console.log(`[GROQ INFERENCE]: Executing query with model '${targetModel}'`);
+
+    const completion = await groq.chat.completions.create({
+      model: targetModel,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: message },
+      ],
+      temperature: 0.2,
+      max_tokens: 1500,
+    });
+
+    const reply = completion.choices[0]?.message?.content || "Unable to generate legal analysis at this time.";
 
     // Save assistant reply to database
     try {
@@ -198,7 +206,7 @@ GUIDELINES:
       { headers: corsHeaders }
     );
   } catch (error: any) {
-    console.error("Chat Error:", error);
+    console.error("Chat Execution Error:", error);
     return new Response(
       JSON.stringify({ error: `AI Engine Error: ${error.message || "Failed to process inquiry"}` }),
       { status: 500, headers: corsHeaders }
