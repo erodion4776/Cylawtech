@@ -20,7 +20,8 @@ import {
   PlusCircle,
   ChevronRight,
   ChevronLeft,
-  Zap
+  Zap,
+  RefreshCw
 } from 'lucide-react';
 
 interface SystemConfiguration {
@@ -39,10 +40,13 @@ interface ApiKey {
 
 interface Document {
   id: string;
-  title?: string;
-  content: string;
-  site: string;
-  context: string;
+  title: string;
+  jurisdiction: string;
+  document_type: string;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  total_sections: number;
+  processed_sections: number;
+  created_at: string;
 }
 
 type AdminTab = 'home' | 'settings' | 'keys' | 'docs';
@@ -58,14 +62,15 @@ export default function AdminSaaS() {
   const [loading, setLoading] = useState(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
-  // Layout States
+  // Layout & Interaction States
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [ingestPanelOpen, setIngestPanelOpen] = useState(false);
 
   // Ingestion Form State
+  const [docTitle, setDocTitle] = useState('');
+  const [docType, setDocType] = useState('statute');
   const [knowledgeText, setKnowledgeText] = useState('');
   const [knowledgeJur, setKnowledgeJurisdiction] = useState('nigeria');
-  const [knowledgeContext, setKnowledgeContext] = useState('general');
   const [isUploading, setIsUploading] = useState(false);
   const [uploadSuccess, setUploadSuccess] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -73,6 +78,15 @@ export default function AdminSaaS() {
   useEffect(() => {
     if (adminKey) validateAndFetch();
   }, [adminKey]);
+
+  // Poll statutory library progress on interval
+  useEffect(() => {
+    let interval: any;
+    if (isAuth && activeTab === 'docs') {
+      interval = setInterval(fetchData, 4000);
+    }
+    return () => clearInterval(interval);
+  }, [isAuth, activeTab]);
 
   const validateAndFetch = async () => {
     setLoading(true);
@@ -146,10 +160,9 @@ export default function AdminSaaS() {
     setTimeout(() => setCopiedKey(null), 2000);
   };
 
-  // Ingestion to high-speed consolidated admin documents endpoint
   const handleIngestKnowledge = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!knowledgeText.trim()) return;
+    if (!docTitle.trim() || !knowledgeText.trim()) return;
 
     setIsUploading(true);
     setUploadSuccess(null);
@@ -163,28 +176,26 @@ export default function AdminSaaS() {
           'x-admin-key': adminKey 
         },
         body: JSON.stringify({
-          text: knowledgeText,
-          site: knowledgeJur,
-          context: knowledgeContext,
-          metadata: {
-            uploaded_at: new Date().toISOString(),
-            source: 'Portal Ingestion'
-          }
+          title: docTitle,
+          document_type: docType,
+          jurisdiction: knowledgeJur,
+          content: knowledgeText
         })
       });
 
       const data = await res.json();
 
       if (res.ok) {
-        setUploadSuccess(data.message || 'Legal insights successfully indexed.');
+        setUploadSuccess(data.message || 'Knowledge registered successfully.');
+        setDocTitle('');
         setKnowledgeText('');
         fetchData();
-        setTimeout(() => setIngestPanelOpen(false), 1500);
+        setTimeout(() => setIngestPanelOpen(false), 2000);
       } else {
-        setUploadError(data.error || 'Failed to feed knowledge to AI.');
+        setUploadError(data.error || 'Failed to submit knowledge.');
       }
     } catch {
-      setUploadError('Connection error while saving knowledge.');
+      setUploadError('Connection error.');
     } finally {
       setIsUploading(false);
     }
@@ -203,7 +214,6 @@ export default function AdminSaaS() {
     }
   };
 
-  // ======= AUTHENTICATION SCREEN =======
   if (!isAuth) {
     return (
       <div className="min-h-[100dvh] bg-slate-950 flex items-center justify-center p-4">
@@ -232,7 +242,6 @@ export default function AdminSaaS() {
     );
   }
 
-  // Available Admin Features
   const adminFeatures = [
     { 
       id: 'settings' as AdminTab,
@@ -267,13 +276,13 @@ export default function AdminSaaS() {
   return (
     <div className="min-h-[100dvh] bg-slate-950 text-slate-300 flex flex-col md:flex-row font-sans relative">
 
-      {/* ==================== STICKY MOBILE NAVIGATION BAR ==================== */}
-      <header className="flex md:hidden items-center justify-between px-4 py-3 bg-slate-900/95 border-b border-slate-800 fixed top-0 inset-x-0 z-40 backdrop-blur-md h-14">
+      {/* ==================== MOBILE HEADER BAR ==================== */}
+      <header className="flex md:hidden items-center justify-between px-4 py-3 bg-slate-900/90 border-b border-slate-800 fixed top-0 inset-x-0 z-40 backdrop-blur-md h-14">
         <div className="flex items-center gap-2 min-w-0">
           {activeTab !== 'home' ? (
             <button
               onClick={() => setActiveTab('home')}
-              className="p-1.5 -ml-1 rounded-lg hover:bg-slate-800 text-slate-300 bg-transparent border-0 cursor-pointer transition-colors shrink-0"
+              className="p-1.5 -ml-1 rounded-lg hover:bg-slate-800 text-slate-300 bg-transparent border-0 cursor-pointer shrink-0"
             >
               <ChevronLeft size={20} />
             </button>
@@ -297,16 +306,12 @@ export default function AdminSaaS() {
         {sidebarOpen && (
           <>
             <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               onClick={() => setSidebarOpen(false)}
               className="fixed inset-0 z-40 bg-black/60 backdrop-blur-xs md:hidden"
             />
             <motion.aside
-              initial={{ x: '-100%' }}
-              animate={{ x: 0 }}
-              exit={{ x: '-100%' }}
+              initial={{ x: '-100%' }} animate={{ x: 0 }} exit={{ x: '-100%' }}
               transition={{ type: 'spring', damping: 26, stiffness: 220 }}
               className="fixed top-0 bottom-0 left-0 w-72 bg-[#0c0d12] border-r border-slate-900 p-6 flex flex-col justify-between z-50 md:hidden shadow-2xl"
             >
@@ -316,10 +321,7 @@ export default function AdminSaaS() {
                     <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-black text-sm">LA</div>
                     <span className="font-bold text-white text-base">Counsel Admin</span>
                   </div>
-                  <button 
-                    onClick={() => setSidebarOpen(false)}
-                    className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white bg-transparent border-0 cursor-pointer"
-                  >
+                  <button onClick={() => setSidebarOpen(false)} className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white bg-transparent border-0 cursor-pointer">
                     <X size={18} />
                   </button>
                 </div>
@@ -363,7 +365,7 @@ export default function AdminSaaS() {
         )}
       </AnimatePresence>
 
-      {/* ==================== DESKTOP PERMANENT SIDEBAR ==================== */}
+      {/* ==================== DESKTOP SIDEBAR ==================== */}
       <aside className="hidden md:flex sticky top-0 h-screen w-64 bg-[#0c0d12] border-r border-slate-900 p-6 flex-col justify-between shrink-0">
         <div>
           <div className="flex items-center gap-2 mb-8">
@@ -407,43 +409,36 @@ export default function AdminSaaS() {
         </button>
       </aside>
 
-      {/* ==================== MAIN WORKSPACE ==================== */}
+      {/* ==================== WORKSPACE WINDOW ==================== */}
       <main className="flex-grow overflow-y-auto max-w-full pt-14 md:pt-0">
         <div className="p-4 sm:p-6 md:p-10">
 
-          {/* ==================== DASHBOARD HUB (MOBILE HOME) ==================== */}
+          {/* ==================== HUB VIEW ==================== */}
           {activeTab === 'home' && (
-            <motion.div 
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="max-w-4xl mx-auto space-y-6"
-            >
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="max-w-4xl mx-auto space-y-6">
               <div>
-                <h3 className="text-2xl sm:text-3xl font-black text-white tracking-tight">Welcome, Counsel</h3>
-                <p className="text-xs sm:text-sm text-slate-400 mt-1.5">Select a workspace to manage your intelligence platform.</p>
+                <h3 className="text-2xl sm:text-3xl font-black text-white tracking-tight">Practice Dashboard</h3>
+                <p className="text-xs sm:text-sm text-slate-400 mt-1.5">Manage access permissions and indexing statuses.</p>
               </div>
 
-              {/* Status Card */}
+              {/* Live Status Header */}
               <div className={cn("p-5 rounded-3xl border flex items-center gap-4 shadow-xl", settings?.api_enabled ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-rose-500/5 border-rose-500/20')}>
                 <div className={cn("w-11 h-11 rounded-2xl flex items-center justify-center shrink-0", settings?.api_enabled ? 'bg-emerald-500/15' : 'bg-rose-500/15')}>
                   <Zap size={20} className={settings?.api_enabled ? 'text-emerald-400' : 'text-rose-400'} />
                 </div>
                 <div className="min-w-0 flex-grow">
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">System Status</p>
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-sans">SaaS System Status</p>
                   <p className={cn("text-base font-bold", settings?.api_enabled ? 'text-emerald-400' : 'text-rose-400')}>
-                    {settings?.api_enabled ? 'Live and Accepting Queries' : 'Platform Offline'}
+                    {settings?.api_enabled ? 'Active and Processing Inquiries' : 'System Offline / Maintenance'}
                   </p>
                 </div>
-                <button
-                  onClick={handleToggleSystem}
-                  className={cn("w-11 h-6 rounded-full relative border-0 cursor-pointer shrink-0 transition-colors", settings?.api_enabled ? 'bg-emerald-500' : 'bg-slate-700')}
-                >
+                <button onClick={handleToggleSystem} className={cn("w-11 h-6 rounded-full relative border-0 cursor-pointer shrink-0 transition-colors", settings?.api_enabled ? 'bg-emerald-500' : 'bg-slate-700')}>
                   <div className={cn("w-4 h-4 bg-white rounded-full absolute top-1 transition-all", settings?.api_enabled ? 'left-6' : 'left-1')} />
                 </button>
               </div>
 
-              {/* Admin Feature Cards (Hub Grid) */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Menu Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 {adminFeatures.map((feature) => (
                   <button
                     key={feature.id}
@@ -454,14 +449,9 @@ export default function AdminSaaS() {
                       <div className={cn("w-11 h-11 rounded-2xl bg-slate-950/80 border border-slate-800 flex items-center justify-center", feature.iconColor)}>
                         <feature.icon size={20} />
                       </div>
-                      {feature.badge !== undefined && (
-                        <span className="text-[10px] font-bold text-slate-500 bg-slate-950 border border-slate-800 px-2 py-0.5 rounded-full">
-                          {feature.badge} total
-                        </span>
-                      )}
                     </div>
-                    <h4 className="font-bold text-white text-sm sm:text-base mb-1">{feature.label}</h4>
-                    <p className="text-xs text-slate-400 leading-relaxed">{feature.desc}</p>
+                    <h4 className="font-bold text-white text-sm mb-1">{feature.label}</h4>
+                    <p className="text-xs text-slate-400 leading-relaxed pr-6">{feature.desc}</p>
                     <ChevronRight size={16} className="absolute right-5 bottom-5 text-slate-600 group-hover:text-white group-hover:translate-x-1 transition-all" />
                   </button>
                 ))}
@@ -469,54 +459,37 @@ export default function AdminSaaS() {
             </motion.div>
           )}
 
-          {/* ==================== TAB: PRACTICE STATUS ==================== */}
+          {/* ==================== PRACTICE STATUS TAB ==================== */}
           {activeTab === 'settings' && (
-            <motion.div 
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="max-w-xl mx-auto space-y-6"
-            >
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="max-w-xl mx-auto space-y-6">
               <div className="hidden md:block">
                 <h3 className="text-xl sm:text-2xl font-black text-white tracking-tight">Practice Status</h3>
-                <p className="text-xs text-slate-400 mt-1">Control AI availability across the LexAI platform</p>
               </div>
-
               <div className="bg-slate-900 border border-slate-800 p-5 sm:p-6 rounded-3xl flex flex-col sm:flex-row gap-4 sm:items-center sm:justify-between shadow-xl">
                 <div>
                   <h4 className="font-bold text-white text-sm sm:text-base">Global AI Intelligence Access</h4>
                   <p className="text-xs text-slate-400 mt-0.5">Toggle instant availability across all legal workspaces</p>
                 </div>
-                <button
-                  onClick={handleToggleSystem}
-                  className={cn("w-12 h-6.5 rounded-full transition-colors relative border-0 cursor-pointer self-start sm:self-auto shrink-0", settings?.api_enabled ? 'bg-emerald-600' : 'bg-slate-700')}
-                >
+                <button onClick={handleToggleSystem} className={cn("w-12 h-6.5 rounded-full transition-colors relative border-0 cursor-pointer self-start sm:self-auto shrink-0", settings?.api_enabled ? 'bg-emerald-600' : 'bg-slate-700')}>
                   <div className={cn("w-4.5 h-4.5 bg-white rounded-full absolute top-1 transition-all", settings?.api_enabled ? 'left-6' : 'left-1')} />
                 </button>
               </div>
             </motion.div>
           )}
 
-          {/* ==================== TAB: CLIENT KEYS ==================== */}
+          {/* ==================== CLIENT KEYS TAB ==================== */}
           {activeTab === 'keys' && (
-            <motion.div 
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="max-w-4xl mx-auto space-y-6"
-            >
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="max-w-4xl mx-auto space-y-6">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="hidden md:block">
                   <h3 className="text-xl sm:text-2xl font-black text-white tracking-tight">Client Firm Licenses</h3>
-                  <p className="text-xs text-slate-400 mt-1">Issue or revoke firm-level access keys</p>
                 </div>
-                <button 
-                  onClick={handleCreateKey} 
-                  className="w-full sm:w-auto bg-blue-600 hover:bg-blue-500 text-white px-4 py-3 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-2 border-0 cursor-pointer active:scale-95 transition-all shadow-lg"
-                >
+                <button onClick={handleCreateKey} className="w-full sm:w-auto bg-blue-600 hover:bg-blue-500 text-white px-4 py-3 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-2 border-0 cursor-pointer active:scale-95 transition-all shadow-lg">
                   <Plus size={15} /> New Client License
                 </button>
               </div>
 
-              {/* Desktop Table */}
+              {/* Table */}
               <div className="hidden sm:block bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-xl">
                 <table className="w-full text-left text-sm">
                   <thead>
@@ -529,13 +502,13 @@ export default function AdminSaaS() {
                   </thead>
                   <tbody className="divide-y divide-slate-800/60">
                     {apiKeys.length === 0 ? (
-                      <tr><td colSpan={4} className="p-8 text-center text-slate-500">No client licenses issued yet.</td></tr>
+                      <tr><td colSpan={4} className="p-8 text-center text-slate-500">No licenses issued yet.</td></tr>
                     ) : apiKeys.map((k) => (
                       <tr key={k.id} className="hover:bg-slate-950/25 transition-colors">
                         <td className="p-4 font-bold text-white">{k.site}</td>
                         <td className="p-4 font-mono text-xs text-slate-400">
                           {k.key.substring(0, 10)}••••••••••
-                          <button onClick={() => handleCopyKey(k.key)} className="ml-2 text-slate-500 hover:text-white inline bg-transparent border-0 cursor-pointer">
+                          <button onClick={() => handleCopyKey(k.key)} className="ml-2 text-slate-500 hover:text-white bg-transparent border-0 cursor-pointer">
                             {copiedKey === k.key ? <CheckCircle2 size={12} className="inline text-emerald-400 animate-pulse" /> : <Copy size={12} className="inline" />}
                           </button>
                         </td>
@@ -557,14 +530,9 @@ export default function AdminSaaS() {
                 </table>
               </div>
 
-              {/* Mobile Cards */}
+              {/* Cards */}
               <div className="block sm:hidden space-y-3">
-                {apiKeys.length === 0 ? (
-                  <div className="bg-slate-900 border border-slate-800 p-8 rounded-2xl text-center">
-                    <Key size={28} className="mx-auto mb-3 text-slate-600" />
-                    <p className="text-xs text-slate-500">No client licenses issued yet.</p>
-                  </div>
-                ) : apiKeys.map((k) => (
+                {apiKeys.map((k) => (
                   <div key={k.id} className="bg-slate-900 border border-slate-800 p-4 rounded-2xl space-y-3 shadow-md">
                     <div className="flex items-center justify-between">
                       <span className="font-bold text-white text-sm truncate pr-2">{k.site}</span>
@@ -579,11 +547,8 @@ export default function AdminSaaS() {
                       </button>
                     </div>
                     {k.status === 'active' && (
-                      <button 
-                        onClick={() => handleRevokeKey(k.id)} 
-                        className="w-full py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-xl text-xs font-bold border-0 cursor-pointer transition-all"
-                      >
-                        Revoke Firm Access
+                      <button onClick={() => handleRevokeKey(k.id)} className="w-full py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-xl text-xs font-bold border-0 cursor-pointer transition-all">
+                        Revoke Access
                       </button>
                     )}
                   </div>
@@ -592,56 +557,60 @@ export default function AdminSaaS() {
             </motion.div>
           )}
 
-          {/* ==================== TAB: STATUTORY LIBRARY ==================== */}
+          {/* ==================== STATUTORY LIBRARY TAB ==================== */}
           {activeTab === 'docs' && (
-            <motion.div 
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="max-w-4xl mx-auto space-y-6"
-            >
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="max-w-4xl mx-auto space-y-6">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="hidden md:block">
                   <h3 className="text-xl sm:text-2xl font-black text-white tracking-tight">Statutory Library</h3>
-                  <p className="text-xs text-slate-400 mt-1">Manage indexed statutory provisions and case precedents</p>
+                  <p className="text-xs text-slate-400 mt-1">Manage and audit processed legal frameworks and precedents</p>
                 </div>
                 <button 
-                  onClick={() => {
-                    setUploadSuccess(null);
-                    setUploadError(null);
-                    setIngestPanelOpen(true);
-                  }}
-                  className="w-full sm:w-auto bg-blue-600 hover:bg-blue-500 text-white px-5 py-3.5 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-2 border-0 cursor-pointer active:scale-95 transition-all shadow-lg shadow-blue-600/15"
+                  onClick={() => { setUploadSuccess(null); setUploadError(null); setIngestPanelOpen(true); }}
+                  className="w-full sm:w-auto bg-blue-600 hover:bg-blue-500 text-white px-5 py-3.5 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-2 border-0 cursor-pointer active:scale-95 transition-all shadow-lg"
                 >
                   <PlusCircle size={15} /> Teach LexAI New Knowledge
                 </button>
               </div>
 
-              {/* Desktop Table */}
+              {/* Table */}
               <div className="hidden sm:block bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-xl">
                 <table className="w-full text-left text-sm">
                   <thead>
                     <tr className="border-b border-slate-800 text-slate-500 text-xs uppercase font-bold tracking-wider">
                       <th className="p-4">Jurisdiction</th>
-                      <th className="p-4">Context</th>
+                      <th className="p-4">Type</th>
                       <th className="p-4">Title</th>
-                      <th className="p-4">Legal Excerpt</th>
+                      <th className="p-4">Progress / Status</th>
                       <th className="p-4 text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/60">
                     {docs.length === 0 ? (
-                      <tr><td colSpan={5} className="p-8 text-center text-slate-500">No legal documents indexed yet.</td></tr>
+                      <tr><td colSpan={5} className="p-8 text-center text-slate-500">No documents registered.</td></tr>
                     ) : docs.map((doc) => (
                       <tr key={doc.id} className="group hover:bg-slate-950/20 transition-colors">
-                        <td className="p-4 font-bold text-blue-400 uppercase text-xs">{doc.site || 'General'}</td>
-                        <td className="p-4 text-slate-500 text-xs font-semibold">{doc.context || 'general'}</td>
-                        <td className="p-4 text-slate-200 text-xs font-bold max-w-xs truncate">{doc.title || '—'}</td>
-                        <td className="p-4 text-slate-400 text-xs line-clamp-2 max-w-md">{doc.content}</td>
+                        <td className="p-4 font-bold text-blue-400 uppercase text-xs">
+                          {doc.jurisdiction === 'nigeria' ? '🇳🇬 NIGERIA' : '🇺🇸 US LAW'}
+                        </td>
+                        <td className="p-4 text-slate-500 text-xs font-semibold capitalize">{doc.document_type}</td>
+                        <td className="p-4 text-slate-200 text-xs font-bold max-w-xs truncate">{doc.title}</td>
+                        <td className="p-4 align-middle">
+                          {doc.status === 'processing' ? (
+                            <div className="flex items-center gap-2">
+                              <Loader2 size={13} className="animate-spin text-blue-500" />
+                              <span className="text-[11px] text-blue-400 font-mono">Indexing ({doc.processed_sections}/{doc.total_sections || '?'})</span>
+                            </div>
+                          ) : doc.status === 'completed' ? (
+                            <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2.5 py-0.5 rounded-full border border-emerald-500/25">Ready</span>
+                          ) : doc.status === 'failed' ? (
+                            <span className="text-[10px] font-bold text-rose-400 bg-rose-500/10 px-2.5 py-0.5 rounded-full border border-rose-500/25">Failed</span>
+                          ) : (
+                            <span className="text-[10px] font-bold text-slate-400 bg-slate-500/10 px-2.5 py-0.5 rounded-full border border-slate-500/25">Queued</span>
+                          )}
+                        </td>
                         <td className="p-4 text-right align-middle">
-                          <button
-                            onClick={() => handleDeleteDocument(doc.id)}
-                            className="text-slate-600 hover:text-rose-400 p-2 transition-colors opacity-0 group-hover:opacity-100 bg-transparent border-0 cursor-pointer"
-                          >
+                          <button onClick={() => handleDeleteDocument(doc.id)} className="text-slate-600 hover:text-rose-400 p-2 bg-transparent border-0 cursor-pointer">
                             <Trash2 size={14} />
                           </button>
                         </td>
@@ -651,33 +620,34 @@ export default function AdminSaaS() {
                 </table>
               </div>
 
-              {/* Mobile Cards */}
+              {/* Cards */}
               <div className="block sm:hidden space-y-3">
                 {docs.length === 0 ? (
-                  <div className="bg-slate-900 border border-slate-800 p-8 rounded-2xl text-center">
-                    <BookOpen size={28} className="mx-auto mb-3 text-slate-600" />
-                    <p className="text-xs text-slate-500">No legal documents indexed yet.</p>
-                  </div>
+                  <p className="text-xs text-slate-500 text-center py-6">No legal documents indexed.</p>
                 ) : docs.map((doc) => (
                   <div key={doc.id} className="bg-slate-900 border border-slate-800 p-4 rounded-2xl space-y-2.5 relative shadow-md">
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-[10px] font-bold text-blue-400 uppercase tracking-wide bg-blue-500/10 px-2 py-0.5 rounded border border-blue-500/20 truncate">
-                        {doc.site || 'General'}
+                        {doc.jurisdiction === 'nigeria' ? '🇳🇬 NIGERIA' : '🇺🇸 US LAW'}
                       </span>
-                      <span className="text-[10px] font-semibold text-slate-500 truncate">
-                        {doc.context || 'general'}
+                      <span className="text-[10px] font-semibold text-slate-500 capitalize">
+                        {doc.document_type}
                       </span>
                     </div>
-                    {doc.title && (
-                      <p className="text-xs font-bold text-slate-200 pr-8 line-clamp-1">{doc.title}</p>
-                    )}
-                    <p className="text-xs text-slate-400 leading-relaxed line-clamp-4 pr-8">
-                      {doc.content}
-                    </p>
-                    <button
-                      onClick={() => handleDeleteDocument(doc.id)}
-                      className="absolute right-3 bottom-3 p-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 hover:text-rose-300 rounded-xl border-0 cursor-pointer transition-all"
-                    >
+                    <p className="text-xs font-bold text-slate-200 pr-8 line-clamp-1">{doc.title}</p>
+                    <div className="flex items-center justify-between pt-1">
+                      {doc.status === 'processing' ? (
+                        <div className="flex items-center gap-2">
+                          <Loader2 size={12} className="animate-spin text-blue-500" />
+                          <span className="text-[11px] text-blue-400 font-mono">Indexing ({doc.processed_sections}/{doc.total_sections})</span>
+                        </div>
+                      ) : (
+                        <span className={cn('text-[9px] font-bold uppercase border px-2 py-0.5 rounded-full', 
+                          doc.status === 'completed' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-slate-500/10 text-slate-400 border-slate-500/20'
+                        )}>{doc.status}</span>
+                      )}
+                    </div>
+                    <button onClick={() => handleDeleteDocument(doc.id)} className="absolute right-3 bottom-3 p-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-xl border-0 cursor-pointer">
                       <Trash2 size={13} />
                     </button>
                   </div>
@@ -693,16 +663,12 @@ export default function AdminSaaS() {
         {ingestPanelOpen && (
           <>
             <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               onClick={() => { if (!isUploading) setIngestPanelOpen(false); }}
               className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-xs"
             />
             <motion.div
-              initial={{ x: '100%' }}
-              animate={{ x: 0 }}
-              exit={{ x: '100%' }}
+              initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
               transition={{ type: 'spring', damping: 28, stiffness: 220 }}
               className="fixed top-0 bottom-0 right-0 w-full sm:max-w-lg bg-slate-900 border-l border-slate-800 flex flex-col z-[110] shadow-2xl"
             >
@@ -710,54 +676,63 @@ export default function AdminSaaS() {
               <div className="flex items-center justify-between p-5 border-b border-slate-800 shrink-0">
                 <div className="flex items-center gap-2.5 min-w-0">
                   <UploadCloud className="text-blue-500 shrink-0" size={20} />
-                  <h4 className="font-bold text-white text-base truncate">Teach LexAI</h4>
+                  <h4 className="font-bold text-white text-base truncate">Teach LexAI Knowledge</h4>
                 </div>
-                <button
-                  onClick={() => setIngestPanelOpen(false)}
-                  className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white bg-transparent border-0 cursor-pointer transition-colors shrink-0"
-                >
+                <button onClick={() => setIngestPanelOpen(false)} className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white bg-transparent border-0 cursor-pointer shrink-0">
                   <X size={18} />
                 </button>
               </div>
 
               {/* Scrollable Form Body */}
-              <div className="flex-grow overflow-y-auto p-5 space-y-5">
-                <p className="text-xs text-slate-400 leading-relaxed">
-                  Input statutes, precedents, or legal rules. The ingestion engine will automatically segment and register them for LexAI's intelligence memory.
-                </p>
-
+              <div className="flex-grow overflow-y-auto p-5 space-y-4">
                 <form onSubmit={handleIngestKnowledge} className="space-y-4">
                   <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Jurisdiction Limit</label>
-                    <select
-                      value={knowledgeJur}
-                      onChange={(e) => setKnowledgeJurisdiction(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3.5 text-sm text-slate-200 focus:ring-2 focus:ring-blue-500 outline-none cursor-pointer"
-                    >
-                      <option value="nigeria">🇳🇬 Nigerian Law Library</option>
-                      <option value="us">🇺🇸 US Federal Law Library</option>
-                      <option value="global">🌐 General Legal Principles</option>
-                    </select>
-                  </div>
-
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Legal Context Code</label>
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Document Title</label>
                     <input
                       type="text"
-                      value={knowledgeContext}
-                      onChange={(e) => setKnowledgeContext(e.target.value)}
-                      placeholder="e.g. corporate-tax, contract-disputes"
+                      value={docTitle}
+                      onChange={(e) => setDocTitle(e.target.value)}
+                      placeholder="e.g. 1999 Constitution of Nigeria (Amended)"
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3.5 text-sm text-slate-200 focus:ring-2 focus:ring-blue-500 outline-none"
                     />
                   </div>
 
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Jurisdiction</label>
+                      <select
+                        value={knowledgeJur}
+                        onChange={(e) => setKnowledgeJurisdiction(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-3.5 text-xs text-slate-200 focus:ring-2 focus:ring-blue-500 outline-none cursor-pointer"
+                      >
+                        <option value="nigeria">🇳🇬 Nigeria Law</option>
+                        <option value="us">🇺🇸 US Law</option>
+                      </select>
+                    </div>
+
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Document Type</label>
+                      <select
+                        value={docType}
+                        onChange={(e) => setDocType(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-3.5 text-xs text-slate-200 focus:ring-2 focus:ring-blue-500 outline-none cursor-pointer"
+                      >
+                        <option value="constitution">Constitution</option>
+                        <option value="statute">Statute / Act</option>
+                        <option value="case">Case Law / Precedent</option>
+                        <option value="regulation">Regulation</option>
+                        <option value="principle">Legal Principle</option>
+                      </select>
+                    </div>
+                  </div>
+
                   <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Statutes / Legal Content</label>
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Knowledge Content</label>
                     <textarea
-                      rows={10}
+                      rows={8}
                       value={knowledgeText}
                       onChange={(e) => setKnowledgeText(e.target.value)}
-                      placeholder="Paste legislative clauses, direct citations, standard contract sections, or litigation reasoning..."
+                      placeholder="Paste legislative clauses, judgments, or standard contract sections here..."
                       className="w-full bg-slate-950 border border-slate-800 rounded-2xl px-4 py-3.5 text-sm text-slate-200 focus:ring-2 focus:ring-blue-500 outline-none resize-none leading-relaxed"
                     />
                   </div>
@@ -778,21 +753,21 @@ export default function AdminSaaS() {
                 </form>
               </div>
 
-              {/* Bottom Action Dock */}
+              {/* Bottom Actions */}
               <div className="p-5 border-t border-slate-800 flex gap-2 shrink-0 bg-slate-900">
                 <button
                   onClick={() => setIngestPanelOpen(false)}
-                  className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold border-0 cursor-pointer transition-colors"
+                  className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold border-0 cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleIngestKnowledge}
-                  disabled={isUploading || !knowledgeText.trim()}
+                  disabled={isUploading || !docTitle.trim() || !knowledgeText.trim()}
                   className="flex-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white font-bold py-3 rounded-xl text-xs flex items-center justify-center gap-2 border-0 cursor-pointer active:scale-97 transition-all shadow-lg"
                 >
                   {isUploading ? (
-                    <><Loader2 size={14} className="animate-spin" /> Indexing...</>
+                    <><Loader2 size={14} className="animate-spin" /> Submitting...</>
                   ) : (
                     'Feed Knowledge'
                   )}
