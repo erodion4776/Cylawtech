@@ -136,19 +136,19 @@ GUIDELINES:
 - Reference relevant statutory provisions, principles, and case law where applicable.
 - Answer clearly, directly, and concisely.`;
 
-    // Active Groq models in order of preference
+    // Active production models from your Groq dashboard
     const modelCandidates = [
-      "llama-3.3-70b-versatile",
-      "llama-3.1-8b-instant",
-      "mixtral-8x7b-32768",
-      "llama3-70b-8192",
-      "llama3-8b-8192"
+      "llama-3.1-8b-instant",     // Meta Llama 3.1 8B (560 t/sec)
+      "openai/gpt-oss-120b",      // OpenAI GPT-OSS 120B (500 t/sec)
+      "openai/gpt-oss-20b",       // OpenAI GPT-OSS 20B (1000 t/sec)
+      "qwen/qwen3.8-27b",         // Qwen 3.8 27B (450 t/sec)
+      "llama-3.3-70b-versatile"   // Enterprise fallback
     ];
 
     let reply = "";
     let lastError: any = null;
 
-    // Model fallback chain
+    // Try candidates in order
     for (const modelName of modelCandidates) {
       try {
         const completion = await groq.chat.completions.create({
@@ -163,17 +163,17 @@ GUIDELINES:
 
         reply = completion.choices[0]?.message?.content || "";
         if (reply) {
-          console.log(`Successfully generated response using model: ${modelName}`);
+          console.log(`[AI SUCCESS] Generated response using model: ${modelName}`);
           break;
         }
       } catch (err: any) {
         lastError = err;
-        console.warn(`Model ${modelName} failed, trying next candidate... (${err.message})`);
+        console.warn(`[AI WARN] Model ${modelName} failed (${err.message}). Trying next model...`);
       }
     }
 
     if (!reply) {
-      throw lastError || new Error("All Groq model candidates failed.");
+      throw lastError || new Error("All Groq production models failed.");
     }
 
     // Save assistant reply to database
