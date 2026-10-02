@@ -7,22 +7,22 @@
   targetPort = 5173
   port = 8888
 
-# All API calls now go to Supabase Edge Functions
+# Connect frontend to your live Supabase Edge Functions
 [[redirects]]
   from = "/api/chat"
-  to = "https://YOUR_PROJECT_ID.supabase.co/functions/v1/chat"
+  to = "https://utevbbyriqhnxhoipljv.supabase.co/functions/v1/chat"
   status = 200
   force = true
 
 [[redirects]]
   from = "/api/admin/*"
-  to = "https://YOUR_PROJECT_ID.supabase.co/functions/v1/admin/:splat"
+  to = "https://utevbbyriqhnxhoipljv.supabase.co/functions/v1/admin/:splat"
   status = 200
   force = true
 
 [[redirects]]
   from = "/api/embed"
-  to = "https://YOUR_PROJECT_ID.supabase.co/functions/v1/embed"
+  to = "https://utevbbyriqhnxhoipljv.supabase.co/functions/v1/embed"
   status = 200
   force = true
 
@@ -32,7 +32,7 @@
   to = "/index.html"
   status = 200
 
-# Allow embedding the standalone widget
+# Standalone embed headers
 [[headers]]
   for = "/lex-ai-embed"
   [headers.values]
