@@ -13,27 +13,9 @@ const supabase = createClient(
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || ""
 );
 
-async function getEmbedding(text: string): Promise<number[] | null> {
-  const key = Deno.env.get("GEMINI_API_KEY");
-  if (!key) return null;
-  try {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=${key}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "models/text-embedding-004",
-          content: { parts: [{ text: text.substring(0, 2000) }] },
-        }),
-      }
-    );
-    const data = await res.json();
-    return data?.embedding?.values || null;
-  } catch {
-    return null;
-  }
-}
+// Built-in Native Supabase Embedding Model
+// @ts-ignore
+const model = new Supabase.ai.Session("gte-small");
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -52,7 +34,7 @@ serve(async (req) => {
     const { text, site = "lexai", context = "general", metadata = {} } = await req.json();
 
     if (!text || text.trim().length < 50) {
-      return new Response(JSON.stringify({ error: "Document content too short" }), {
+      return new Response(JSON.stringify({ error: "Document content too short." }), {
         status: 400,
         headers: corsHeaders,
       });
@@ -61,12 +43,17 @@ serve(async (req) => {
     const chunks = text
       .split(/\n\n+/)
       .map((c: string) => c.trim())
-      .filter((c: string) => c.length > 100);
+      .filter((c: string) => c.length > 80);
 
     let indexed = 0;
     for (const chunk of chunks) {
-      const embedding = await getEmbedding(chunk);
-      if (embedding) {
+      try {
+        const rawEmbedding = await model.run(chunk.substring(0, 1000), {
+          mean_pool: true,
+          normalize: true,
+        });
+        const embedding = Array.from(rawEmbedding);
+
         const { error } = await supabase.from("documents").insert({
           content: chunk,
           embedding,
@@ -74,18 +61,21 @@ serve(async (req) => {
           context,
           metadata,
         });
+
         if (!error) indexed++;
+      } catch (err) {
+        console.error("Chunk indexing error:", err);
       }
     }
 
     return new Response(
       JSON.stringify({
-        message: `Successfully indexed ${indexed} of ${chunks.length} sections into the legal knowledge base.`,
+        message: `Successfully indexed ${indexed} of ${chunks.length} sections into the statutory library.`,
       }),
       { headers: corsHeaders }
     );
   } catch (error: any) {
-    return new Response(JSON.stringify({ error: "Document processing failed" }), {
+    return new Response(JSON.stringify({ error: "Failed to index document." }), {
       status: 500,
       headers: corsHeaders,
     });
