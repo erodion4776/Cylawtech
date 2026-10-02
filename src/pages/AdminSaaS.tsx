@@ -2,22 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import { 
-  Settings, 
-  Key, 
-  FileText, 
-  Shield, 
-  Plus, 
-  Trash2, 
-  Power, 
-  Cpu, 
-  AlertCircle,
-  CheckCircle2,
-  Lock,
-  Search,
-  ExternalLink,
-  ChevronRight,
-  Database,
-  Copy
+  Settings, Key, FileText, Shield, Plus, Trash2, 
+  Power, Cpu, Lock, CheckCircle2, Copy, BookOpen
 } from 'lucide-react';
 
 interface Settings {
@@ -41,45 +27,28 @@ interface Document {
   context: string;
 }
 
-const API_BASE = '/api/admin';
-
 export default function AdminSaaS() {
-  useDocumentTitle('LexAI - SaaS Admin');
+  useDocumentTitle('LexAI - Practice Control Portal');
   const [adminKey, setAdminKey] = useState<string>(localStorage.getItem('lex_admin_key') || '');
   const [isAuth, setIsAuth] = useState(false);
-  const [activeTab, setActiveTab] = useState<'settings' | 'keys' | 'docs' | 'playground'>('settings');
+  const [activeTab, setActiveTab] = useState<'settings' | 'keys' | 'docs'>('settings');
   const [settings, setSettings] = useState<Settings | null>(null);
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
   const [docs, setDocs] = useState<Document[]>([]);
   const [loading, setLoading] = useState(false);
-  const [uploadDiagnostics, setUploadDiagnostics] = useState<{
-    status: 'idle' | 'loading' | 'success' | 'error';
-    message: string;
-    lastStep?: string;
-    details?: string;
-    timestamp?: string;
-  }>({ status: 'idle', message: '' });
-  const [testLoading, setTestLoading] = useState(false);
-  const [testResponse, setTestResponse] = useState<{status: number, data: any} | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   useEffect(() => {
-    if (adminKey) {
-      validateAndFetch();
-    }
+    if (adminKey) validateAndFetch();
   }, [adminKey]);
 
   const validateAndFetch = async () => {
     setLoading(true);
-    setError(null);
     try {
-      const res = await fetch(`${API_BASE}/settings`, {
+      const res = await fetch('/api/admin/settings', {
         headers: { 'x-admin-key': adminKey }
       });
-      
       const data = await res.json();
-      
       if (res.ok) {
         setSettings(data);
         setIsAuth(true);
@@ -87,105 +56,56 @@ export default function AdminSaaS() {
         fetchData();
       } else {
         setIsAuth(false);
-        setError(data.error || "Authorization failed");
       }
-    } catch (e: any) {
-      setError(`Connection Error: ${e.message || "Unknown error"}`);
-      console.error("Admin Auth Error:", e);
+    } catch {
+      setIsAuth(false);
     } finally {
       setLoading(false);
     }
   };
 
   const fetchData = async () => {
-    if (!adminKey) return;
     try {
       const [keysRes, docsRes] = await Promise.all([
-        fetch(`${API_BASE}/keys`, { headers: { 'x-admin-key': adminKey } }),
-        fetch(`${API_BASE}/documents`, { headers: { 'x-admin-key': adminKey } })
+        fetch('/api/admin/keys', { headers: { 'x-admin-key': adminKey } }),
+        fetch('/api/admin/documents', { headers: { 'x-admin-key': adminKey } })
       ]);
-      if (keysRes.ok) {
-        const keysData = await keysRes.json();
-        setApiKeys(Array.isArray(keysData) ? keysData : []);
-      }
-      if (docsRes.ok) {
-        const docsData = await docsRes.json();
-        setDocs(Array.isArray(docsData) ? docsData : []);
-      }
+      if (keysRes.ok) setApiKeys(await keysRes.json());
+      if (docsRes.ok) setDocs(await docsRes.json());
     } catch (e) {
-      console.error("Fetch data error", e);
+      console.error(e);
     }
   };
 
-  const handleUpdateSettings = async (updates: Partial<Settings>) => {
+  const handleToggleSystem = async () => {
     if (!settings) return;
-    try {
-      const res = await fetch(`${API_BASE}/settings`, {
-        method: 'PATCH',
-        headers: { 
-          'Content-Type': 'application/json',
-          'x-admin-key': adminKey 
-        },
-        body: JSON.stringify({ ...settings, ...updates })
-      });
-      if (res.ok) setSettings(await res.json());
-    } catch (e) {
-      setError("Failed to update settings");
-    }
+    const updated = !settings.api_enabled;
+    const res = await fetch('/api/admin/settings', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'x-admin-key': adminKey },
+      body: JSON.stringify({ ...settings, api_enabled: updated })
+    });
+    if (res.ok) setSettings(await res.json());
   };
 
-  const handleCreateKey = async (site: string) => {
-    try {
-      const res = await fetch(`${API_BASE}/keys`, {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'x-admin-key': adminKey 
-        },
-        body: JSON.stringify({ site })
-      });
-      if (res.ok) fetchData();
-    } catch (e) {
-      setError("Failed to create key");
-    }
-  };
-
-  const handleRunAiTest = async (site: string, apiKey: string, message: string) => {
-    setTestLoading(true);
-    setTestResponse(null);
-    try {
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': apiKey
-        },
-        body: JSON.stringify({
-          message,
-          site,
-          jurisdiction: 'general'
-        })
-      });
-      
-      const data = await res.json();
-      setTestResponse({ status: res.status, data });
-    } catch (err: any) {
-      setTestResponse({ status: 500, data: { error: err.message } });
-    } finally {
-      setTestLoading(false);
-    }
+  const handleCreateKey = async () => {
+    const firmName = prompt('Enter Law Firm / Client Name:');
+    if (!firmName) return;
+    const res = await fetch('/api/admin/keys', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-admin-key': adminKey },
+      body: JSON.stringify({ site: firmName })
+    });
+    if (res.ok) fetchData();
   };
 
   const handleRevokeKey = async (id: string) => {
-    try {
-      const res = await fetch(`${API_BASE}/keys/${id}`, {
-        method: 'DELETE',
-        headers: { 'x-admin-key': adminKey }
-      });
-      if (res.ok) fetchData();
-    } catch (e) {
-      setError("Failed to revoke key");
-    }
+    if (!confirm('Revoke access for this client key?')) return;
+    const res = await fetch(`/api/admin/keys/${id}`, {
+      method: 'DELETE',
+      headers: { 'x-admin-key': adminKey }
+    });
+    if (res.ok) fetchData();
   };
 
   const handleCopyKey = (key: string) => {
@@ -194,752 +114,173 @@ export default function AdminSaaS() {
     setTimeout(() => setCopiedKey(null), 2000);
   };
 
-  const handleDeleteDoc = async (id: string) => {
-    try {
-      const res = await fetch(`${API_BASE}/documents/${id}`, {
-        method: 'DELETE',
-        headers: { 'x-admin-key': adminKey }
-      });
-      if (res.ok) fetchData();
-    } catch (e) {
-      setError("Failed to delete document");
-    }
-  };
-
   if (!isAuth) {
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6 font-sans">
-        <motion.div 
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="w-full max-w-md bg-slate-900 border border-slate-800 p-8 rounded-2xl shadow-2xl shadow-blue-900/10"
-        >
-          <div className="flex justify-center mb-6">
-            <div className="w-16 h-16 bg-blue-600/20 rounded-full flex items-center justify-center border border-blue-500/30">
-              <Shield className="text-blue-500 w-8 h-8" />
-            </div>
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6">
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-md bg-slate-900 border border-slate-800 p-8 rounded-3xl text-center">
+          <div className="w-14 h-14 bg-blue-600/20 text-blue-500 rounded-2xl flex items-center justify-center mx-auto mb-6">
+            <Shield size={28} />
           </div>
-          <h1 className="text-2xl font-bold text-white text-center mb-2">LexAI SaaS Admin</h1>
-          <p className="text-slate-400 text-center mb-8">Enter your master admin key to access the control panel</p>
-          
-          <div className="space-y-4">
-            <div>
-              <label className="text-xs uppercase font-bold text-slate-500 mb-1.5 block tracking-widest">Admin Authorization Key</label>
-              <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
-                <input 
-                  type="password"
-                  value={adminKey}
-                  onChange={(e) => setAdminKey(e.target.value)}
-                  placeholder="••••••••••••••••"
-                  className="w-full bg-slate-800 border border-slate-700 rounded-xl py-3 pl-10 pr-4 text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition-all font-mono"
-                />
-              </div>
-            </div>
-            
-            <button 
-              onClick={validateAndFetch}
-              disabled={loading}
-              className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold py-3 px-6 rounded-xl transition-all shadow-lg shadow-blue-600/20 active:scale-[0.98]"
-            >
-              {loading ? "Authorizing..." : "Access Dashboard"}
-            </button>
-            
-            {error && (
-              <div className="flex items-center gap-2 text-rose-400 text-sm bg-rose-400/10 p-3 rounded-xl border border-rose-400/20">
-                <AlertCircle className="w-4 h-4 shrink-0" />
-                <p>{error}</p>
-              </div>
-            )}
-          </div>
+          <h2 className="text-2xl font-bold text-white mb-2">Practice Control Portal</h2>
+          <p className="text-slate-400 text-sm mb-6">Enter master authorization key to continue</p>
+          <input
+            type="password"
+            value={adminKey}
+            onChange={(e) => setAdminKey(e.target.value)}
+            placeholder="••••••••••••••••"
+            className="w-full bg-slate-800 border border-slate-700 rounded-xl py-3 px-4 text-white mb-4 text-center focus:ring-2 focus:ring-blue-500 outline-none"
+          />
+          <button
+            onClick={validateAndFetch}
+            disabled={loading}
+            className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl transition-all"
+          >
+            {loading ? 'Authenticating...' : 'Access Workspace'}
+          </button>
         </motion.div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#050505] text-slate-300 font-sans flex">
+    <div className="min-h-screen bg-slate-950 text-slate-300 flex">
       {/* Sidebar */}
-      <div className="w-72 border-r border-slate-900 bg-[#080808] flex flex-col p-6">
-        <div className="flex items-center gap-3 mb-10 px-2">
-          <div className="w-8 h-8 bg-blue-600 rounded flex items-center justify-center">
-            <Cpu className="text-white w-5 h-5" />
+      <div className="w-64 border-r border-slate-900 bg-slate-900/40 p-6 flex flex-col justify-between">
+        <div>
+          <div className="flex items-center gap-2 mb-8">
+            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-black text-sm">LA</div>
+            <span className="font-bold text-white">Counsel Admin</span>
           </div>
-          <span className="text-xl font-bold text-white tracking-tight">LexAI Admin</span>
+
+          <nav className="space-y-1.5">
+            {[
+              { id: 'settings', label: 'Practice Status', icon: Settings },
+              { id: 'keys', label: 'Client Firm Keys', icon: Key },
+              { id: 'docs', label: 'Statutory Library', icon: BookOpen },
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id as any)}
+                className={cn(
+                  'w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-colors',
+                  activeTab === tab.id ? 'bg-blue-600 text-white' : 'text-slate-400 hover:bg-slate-900'
+                )}
+              >
+                <tab.icon size={16} /> {tab.label}
+              </button>
+            ))}
+          </nav>
         </div>
 
-        <nav className="space-y-2 flex-grow">
-          {[
-            { id: 'settings', label: 'System Settings', icon: Settings },
-            { id: 'keys', label: 'Client API Keys', icon: Key },
-            { id: 'docs', label: 'Knowledge Base', icon: Database },
-            { id: 'playground', label: 'AI Playground', icon: Cpu },
-          ].map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id as any)}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all text-sm font-medium ${
-                activeTab === tab.id 
-                  ? 'bg-blue-600/10 text-blue-400 border border-blue-500/20' 
-                  : 'hover:bg-slate-900 text-slate-500 hover:text-slate-300'
-              }`}
-            >
-              <tab.icon className="w-4 h-4" />
-              {tab.label}
-            </button>
-          ))}
-        </nav>
-
-        <div className="pt-6 border-t border-slate-900">
-          <button 
-            onClick={() => {
-              localStorage.removeItem('lex_admin_key');
-              window.location.reload();
-            }}
-            className="flex items-center gap-2 text-xs font-bold text-slate-600 hover:text-rose-500 transition-colors px-4 py-2"
-          >
-            <Power className="w-3 h-3" />
-            SIGN OUT
-          </button>
-        </div>
+        <button
+          onClick={() => {
+            localStorage.removeItem('lex_admin_key');
+            window.location.reload();
+          }}
+          className="flex items-center gap-2 text-xs font-bold text-slate-500 hover:text-rose-400"
+        >
+          <Power size={14} /> SIGN OUT
+        </button>
       </div>
 
-      {/* Main Content */}
+      {/* Main Panel */}
       <main className="flex-grow p-10 overflow-y-auto">
-        <header className="flex justify-between items-center mb-10">
+        {activeTab === 'settings' && (
+          <div className="max-w-2xl space-y-6">
+            <h3 className="text-2xl font-bold text-white mb-4">Workspace Availability</h3>
+            <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl flex items-center justify-between">
+              <div>
+                <h4 className="font-bold text-white mb-1">Global AI Intelligence Access</h4>
+                <p className="text-xs text-slate-400">Toggle instant availability across all legal workspaces</p>
+              </div>
+              <button
+                onClick={handleToggleSystem}
+                className={cn("w-14 h-7 rounded-full transition-colors relative", settings?.api_enabled ? 'bg-emerald-600' : 'bg-slate-700')}
+              >
+                <div className={cn("w-5 h-5 bg-white rounded-full absolute top-1 transition-all", settings?.api_enabled ? 'left-8' : 'left-1')} />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'keys' && (
           <div>
-            <h2 className="text-3xl font-bold text-white mb-1">
-              {activeTab === 'settings' && "System Control"}
-              {activeTab === 'keys' && "Client Management"}
-              {activeTab === 'docs' && "Knowledge Assets"}
-              {activeTab === 'playground' && "Network Playground"}
-            </h2>
-            <p className="text-slate-500 text-sm">
-              Manage your decentralized AI network from a central interface
-            </p>
-          </div>
-          <div className="flex gap-4">
-             {settings && (
-               <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-bold ${
-                 settings.api_enabled 
-                   ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' 
-                   : 'bg-rose-500/10 text-rose-400 border-rose-500/20'
-               }`}>
-                 <div className={`w-1.5 h-1.5 rounded-full ${settings.api_enabled ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'}`}></div>
-                 {settings.api_enabled ? "SYSTEM LIVE" : "SYSTEM PAUSED"}
-               </div>
-             )}
-          </div>
-        </header>
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-2xl font-bold text-white">Client Firm Licenses</h3>
+              <button onClick={handleCreateKey} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2">
+                <Plus size={16} /> New Client License
+              </button>
+            </div>
 
-        <AnimatePresence mode="wait">
-          {activeTab === 'settings' && (
-            <motion.div 
-              key="settings"
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
-            >
-              <div className="bg-[#0c0c0c] border border-slate-900 p-8 rounded-2xl mb-8">
-                <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
-                  <ExternalLink className="w-5 h-5 text-emerald-500" />
-                  Netlify Configuration Checklist
-                </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {[
-                    { name: 'SUPABASE_URL', description: 'Supabase API URL', status: !!settings },
-                    { name: 'SUPABASE_SERVICE_ROLE_KEY', description: 'Supabase Secret Key', status: !!settings },
-                    { name: 'GEMINI_API_KEY', description: 'Google AI API Key', status: !!settings },
-                    { name: 'ADMIN_KEY', description: 'SaaS Admin Password', status: isAuth },
-                  ].map((env) => (
-                    <div key={env.name} className="flex items-center justify-between p-4 bg-slate-950/50 rounded-xl border border-slate-800/50">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <code className="text-blue-400 font-bold text-xs">{env.name}</code>
-                          {env.status ? (
-                            <span className="text-[10px] bg-emerald-500/10 text-emerald-500 px-1.5 py-0.5 rounded font-bold uppercase">Detected</span>
-                          ) : (
-                            <span className="text-[10px] bg-amber-500/10 text-amber-500 px-1.5 py-0.5 rounded font-bold uppercase">Missing?</span>
-                          )}
-                        </div>
-                        <p className="text-slate-500 text-[10px] mt-1">{env.description}</p>
-                      </div>
-                      {env.status ? (
-                        <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                      ) : (
-                        <AlertCircle className="w-4 h-4 text-amber-500" />
-                      )}
-                    </div>
-                  ))}
-                </div>
-
-                <div className="mt-8 border-t border-slate-900 pt-6">
-                  <div className="flex items-center justify-between mb-4">
-                    <h4 className="text-sm font-bold text-slate-400 uppercase tracking-widest">Database Health Check</h4>
-                    <button 
-                      onClick={async () => {
-                        try {
-                          setUploadDiagnostics({ status: 'loading', message: 'Running comprehensive connectivity test...', timestamp: new Date().toLocaleTimeString() });
-                          const res = await fetch(`${API_BASE}/test-db`, {
-                            headers: { 'x-admin-key': adminKey }
-                          });
-                          const data = await res.json();
-                          setUploadDiagnostics({
-                            status: res.ok ? 'success' : 'error',
-                            message: res.ok ? 'Connectivity test complete.' : 'Test partially failed.',
-                            details: JSON.stringify(data, null, 2),
-                            timestamp: new Date().toLocaleTimeString()
-                          });
-                        } catch (e: any) {
-                          setUploadDiagnostics({
-                            status: 'error',
-                            message: 'Network error during test',
-                            details: e.message,
-                            timestamp: new Date().toLocaleTimeString()
-                          });
-                        }
-                      }}
-                      className="text-[10px] font-bold bg-slate-900 hover:bg-slate-800 text-slate-400 px-3 py-1 rounded-lg border border-slate-800 transition-colors"
-                    >
-                      RUN CONNECTIVITY TEST
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-               <div className="bg-[#0c0c0c] border border-slate-900 p-8 rounded-2xl">
-                 <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
-                   <Power className="w-5 h-5 text-blue-500" />
-                   API Availability
-                 </h3>
-                 <p className="text-slate-400 text-sm mb-8">
-                   Pause all incoming traffic to the LexAI network across all sites instantly.
-                 </p>
-                 <div className="flex items-center justify-between p-4 bg-slate-950 rounded-xl border border-slate-900">
-                    <span className="font-bold text-slate-300">LexAI Global Status</span>
-                    <button 
-                      onClick={() => handleUpdateSettings({ api_enabled: !settings?.api_enabled })}
-                      className={`relative w-14 h-7 rounded-full transition-colors ${settings?.api_enabled ? 'bg-blue-600' : 'bg-slate-800'}`}
-                    >
-                      <div className={`absolute top-1 w-5 h-5 bg-white rounded-full transition-all ${settings?.api_enabled ? 'left-8' : 'left-1'}`}></div>
-                    </button>
-                 </div>
-               </div>
-
-               <div className="bg-[#0c0c0c] border border-slate-900 p-8 rounded-2xl">
-                 <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
-                   <Cpu className="w-5 h-5 text-purple-500" />
-                   LLM Model Configuration
-                 </h3>
-                 <p className="text-slate-400 text-sm mb-8">
-                   Switch the underlying inference engine for the entire network.
-                 </p>
-                 <div className="space-y-3">
-                   {['gemini-1.5-flash', 'gemini-1.5-pro', 'groq-mixtral-8x7b'].map((model) => (
-                     <button 
-                       key={model}
-                       onClick={() => handleUpdateSettings({ active_model: model })}
-                       className={`w-full flex items-center justify-between p-4 rounded-xl border transition-all ${
-                         settings?.active_model === model 
-                           ? 'bg-purple-600/10 border-purple-500/50 text-purple-300' 
-                           : 'bg-slate-950 border-slate-900 text-slate-500 hover:border-slate-800'
-                       }`}
-                     >
-                        <span className="font-medium capitalize">{model.replace('-', ' ')}</span>
-                        {settings?.active_model === model && <CheckCircle2 className="w-5 h-5" />}
-                     </button>
-                   ))}
-                 </div>
-               </div>
-             </div>
-            </motion.div>
-          )}
-
-          {activeTab === 'keys' && (
-            <motion.div 
-              key="keys"
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
-            >
-              <div className="flex justify-between items-center mb-6">
-                <div className="relative flex-grow max-w-md">
-                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
-                   <input 
-                     placeholder="Search sites or keys..."
-                     className="w-full bg-[#0c0c0c] border border-slate-900 rounded-xl py-2.5 pl-10 pr-4 text-sm focus:outline-none focus:border-blue-500/50"
-                   />
-                </div>
-                <button 
-                  onClick={() => {
-                    const site = prompt("Enter site identifier (e.g. lawfirmA):");
-                    if (site) handleCreateKey(site);
-                  }}
-                  className="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2.5 px-6 rounded-xl flex items-center gap-2 transition-all active:scale-95"
-                >
-                  <Plus className="w-5 h-5" />
-                  GENERATE KEY
-                </button>
-              </div>
-
-              <div className="bg-[#0c0c0c] border border-slate-900 rounded-2xl overflow-hidden shadow-xl">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="bg-[#111] border-bottom border-slate-900">
-                      <th className="p-4 text-xs font-bold text-slate-500 uppercase tracking-widest">Site ID</th>
-                      <th className="p-4 text-xs font-bold text-slate-500 uppercase tracking-widest">Environment Key</th>
-                      <th className="p-4 text-xs font-bold text-slate-500 uppercase tracking-widest">Status</th>
-                      <th className="p-4 text-xs font-bold text-slate-500 uppercase tracking-widest text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-900">
-                    {apiKeys.map((k) => (
-                      <tr key={k.id} className="hover:bg-slate-900/50 transition-colors group">
-                        <td className="p-4 font-bold text-white flex items-center gap-2">
-                          <div className="w-2 h-2 rounded-full bg-blue-500"></div>
-                          {k.site}
-                        </td>
-                        <td className="p-4 font-mono text-xs text-slate-400">
-                          <div className="flex items-center gap-2">
-                            <code className="bg-slate-950 p-1 rounded border border-slate-800">
-                              {k.key.substring(0, 10)}****************
-                            </code>
-                            <button 
-                              onClick={() => handleCopyKey(k.key)}
-                              className={`p-1.5 rounded-lg border transition-all ${
-                                copiedKey === k.key 
-                                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' 
-                                  : 'bg-slate-900 border-slate-800 text-slate-500 hover:text-white hover:border-slate-700'
-                              }`}
-                              title="Copy Full Key"
-                            >
-                              {copiedKey === k.key ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                            </button>
-                            {copiedKey === k.key && (
-                              <span className="text-[10px] text-emerald-500 font-bold animate-pulse">COPIED</span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="p-4 text-xs">
-                          <span className={`px-2.5 py-1 rounded-full font-bold border ${
-                            k.status === 'active' 
-                              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' 
-                              : 'bg-rose-500/10 text-rose-400 border-rose-500/20'
-                          }`}>
-                            {k.status.toUpperCase()}
-                          </span>
-                        </td>
-                        <td className="p-4 text-right">
-                          <button 
-                            disabled={k.status === 'revoked'}
-                            onClick={() => handleRevokeKey(k.id)}
-                            className="text-slate-600 hover:text-rose-500 p-2 transition-all opacity-0 group-hover:opacity-100 disabled:opacity-0"
-                          >
-                            <Trash2 className="w-4 h-4" />
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b border-slate-800 text-slate-500 text-xs uppercase">
+                    <th className="p-4">Firm / Client</th>
+                    <th className="p-4">Access Key</th>
+                    <th className="p-4">Status</th>
+                    <th className="p-4 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800">
+                  {apiKeys.map((k) => (
+                    <tr key={k.id}>
+                      <td className="p-4 font-bold text-white">{k.site}</td>
+                      <td className="p-4 font-mono text-xs text-slate-400">
+                        {k.key.substring(0, 10)}••••••••••
+                        <button onClick={() => handleCopyKey(k.key)} className="ml-2 text-slate-500 hover:text-white inline">
+                          {copiedKey === k.key ? <CheckCircle2 size={12} className="inline text-emerald-400" /> : <Copy size={12} className="inline" />}
+                        </button>
+                      </td>
+                      <td className="p-4">
+                        <span className={cn('px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase', k.status === 'active' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400')}>
+                          {k.status}
+                        </span>
+                      </td>
+                      <td className="p-4 text-right">
+                        {k.status === 'active' && (
+                          <button onClick={() => handleRevokeKey(k.id)} className="text-rose-400 hover:underline text-xs font-bold">
+                            Revoke
                           </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </motion.div>
-          )}
-
-          {activeTab === 'playground' && (
-            <motion.div 
-              key="playground"
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
-              className="h-full flex flex-col"
-            >
-              <div className="bg-[#0c0c0c] border border-slate-900 p-6 rounded-t-2xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                <div>
-                  <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                    <Cpu className="w-5 h-5 text-blue-500" />
-                    Live API Diagnostics - Interactive Chat
-                  </h3>
-                  <p className="text-slate-400 text-sm">
-                    Test your network configuration and API keys with a continuous chat session.
-                  </p>
-                </div>
-                
-                <div className="flex items-center gap-4 w-full md:w-auto">
-                  <select 
-                    id="admin-site-select"
-                    className="bg-slate-950 border border-slate-800 rounded-lg p-2 text-sm focus:border-blue-500 outline-none flex-1 md:flex-none"
-                    onChange={(e) => {
-                      const opt = e.target.options[e.target.selectedIndex];
-                      document.getElementById('admin-key-select')?.setAttribute('value', opt.dataset.key || '');
-                    }}
-                  >
-                    <option value="">Select a configured site...</option>
-                    {apiKeys.filter(k => k.status === 'active').map(k => (
-                      <option key={k.id} value={k.site} data-key={k.key}>{k.site} ({k.key.substring(0,8)}...)</option>
-                    ))}
-                  </select>
-                  <input type="hidden" id="admin-key-select" />
-                </div>
-              </div>
-
-              <div className="flex-grow bg-[#0c0c0c] border-x border-slate-900 p-6 overflow-y-auto max-h-[500px]">
-                {testResponse && testResponse.data && testResponse.data.history ? (
-                  <div className="space-y-4">
-                    {testResponse.data.history.map((msg: any, i: number) => (
-                      <div key={i} className={`flex ${msg.role === 'ai' ? 'justify-start' : 'justify-end'}`}>
-                        <div className={`p-4 rounded-xl max-w-[80%] ${msg.role === 'ai' ? 'bg-slate-900 text-white' : 'bg-blue-600 text-white'}`}>
-                          {msg.content}
-                          {msg.debugInfo && (
-                            <div className="mt-2 p-2 bg-slate-950 rounded text-[10px] text-slate-400 font-mono">
-                              <p>Matches: {msg.debugInfo.matchesFound}</p>
-                              {msg.debugInfo.matches?.map((m: any, mi: number) => (
-                                <p key={mi}>{m.site}/{m.context}: {m.contentPreview}...</p>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="h-full flex flex-col items-center justify-center text-slate-500">
-                    <Cpu className="w-12 h-12 mb-4 opacity-50" />
-                    <p>Select a site and send a message to start diagnostic chat.</p>
-                  </div>
-                )}
-              </div>
-
-              <div className="bg-[#0c0c0c] border border-slate-900 p-4 rounded-b-2xl">
-                <form 
-                  onSubmit={async (e) => {
-                    e.preventDefault();
-                    const f = e.target as HTMLFormElement;
-                    const siteSel = document.getElementById('admin-site-select') as HTMLSelectElement;
-                    const keyVal = document.getElementById('admin-key-select')?.getAttribute('value');
-                    const msgInput = f.elements.namedItem('message') as HTMLInputElement;
-                    
-                    if (!siteSel.value || !keyVal) return alert('Select a site first.');
-                    if (!msgInput.value) return;
-                    
-                    // Add requested message to UI optimistically
-                    const userMsg = msgInput.value;
-                    msgInput.value = '';
-                    setTestResponse((prev: any) => ({
-                      status: 200,
-                      data: {
-                        history: [...(prev?.data?.history || []), { role: 'user', content: userMsg }]
-                      }
-                    }));
-                    
-                    setTestLoading(true);
-                    try {
-                      const res = await fetch('/api/chat', {
-                        method: 'POST',
-                        headers: {
-                          'Content-Type': 'application/json',
-                          'x-api-key': keyVal
-                        },
-                        body: JSON.stringify({
-                          message: userMsg,
-                          site: siteSel.value,
-                          jurisdiction: 'general'
-                        })
-                      });
-                      
-                      const data = await res.json();
-                      setTestResponse((prev: any) => ({
-                        status: res.status,
-                        data: {
-                          ...data,
-                          history: [...(prev?.data?.history || []), { 
-                            role: 'ai', 
-                            content: data.response || data.error,
-                            debugInfo: data.debugInfo 
-                          }]
-                        }
-                      }));
-                    } catch (err: any) {
-                      setTestResponse((prev: any) => ({
-                        status: 500,
-                        data: {
-                          history: [...(prev?.data?.history || []), { 
-                            role: 'ai', 
-                            content: `Error: ${err.message}` 
-                          }]
-                        }
-                      }));
-                    } finally {
-                      setTestLoading(false);
-                    }
-                  }}
-                  className="flex gap-4"
-                >
-                  <input 
-                    name="message"
-                    type="text"
-                    placeholder="Type diagnostic message..."
-                    autoComplete="off"
-                    disabled={testLoading}
-                    className="flex-grow bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm focus:border-blue-500 outline-none text-white disabled:opacity-50"
-                  />
-                  <button 
-                    disabled={testLoading}
-                    type="submit"
-                    className="bg-blue-600 hover:bg-blue-500 text-white font-bold px-6 rounded-xl transition-all disabled:opacity-50"
-                  >
-                    {testLoading ? "..." : "SEND"}
-                  </button>
-                </form>
-              </div>
-            </motion.div>
-          )}
-
-          {activeTab === 'docs' && (
-            <motion.div 
-              key="docs"
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
-            >
-               <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
-                 {[
-                   { label: 'Total Vectors', value: (docs || []).length, icon: Database, colorClass: 'text-blue-500', bgClass: 'bg-blue-600/10', borderClass: 'border-blue-500/20' },
-                   { label: 'Indexed Projects', value: new Set((docs || []).map(d => d.site || 'global')).size, icon: ExternalLink, colorClass: 'text-emerald-500', bgClass: 'bg-emerald-600/10', borderClass: 'border-emerald-500/20' },
-                   { label: 'Storage Usage', value: '2.4 MB', icon: FileText, colorClass: 'text-purple-500', bgClass: 'bg-purple-600/10', borderClass: 'border-purple-500/20' },
-                 ].map((stat) => (
-                   <div key={stat.label} className="bg-[#0c0c0c] border border-slate-900 p-6 rounded-2xl">
-                     <div className="flex justify-between items-start mb-4">
-                       <div className={`p-3 rounded-xl ${stat.bgClass} border ${stat.borderClass}`}>
-                         <stat.icon className={`w-5 h-5 ${stat.colorClass}`} />
-                       </div>
-                       <ChevronRight className="w-4 h-4 text-slate-700" />
-                     </div>
-                     <span className="text-slate-500 text-sm font-bold block mb-1 uppercase tracking-widest">{stat.label}</span>
-                     <span className="text-3xl font-bold text-white">{stat.value}</span>
-                   </div>
-                 ))}
-               </div>
-
-               {/* New Upload Section */}
-               <div className="bg-[#0c0c0c] border border-slate-900 p-8 rounded-2xl mb-10">
-                 <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
-                   <Plus className="w-5 h-5 text-blue-500" />
-                   Upload Knowledge Base
-                 </h3>
-                 <form 
-                  className="grid grid-cols-1 md:grid-cols-4 gap-4"
-                  onSubmit={async (e) => {
-                    e.preventDefault();
-                    const form = e.target as HTMLFormElement;
-                    const fileInput = form.elements.namedItem('file') as HTMLInputElement;
-                    const siteInput = form.elements.namedItem('site') as HTMLInputElement;
-                    const contextInput = form.elements.namedItem('context') as HTMLInputElement;
-                    
-                    if (!fileInput.files?.[0]) return alert("Select a file");
-                    
-                    setLoading(true);
-                    const file = fileInput.files[0];
-                    const reader = new FileReader();
-                    reader.onload = async () => {
-                      const base64 = (reader.result as string).split(',')[1];
-                      try {
-                        const res = await fetch('/api/embed', {
-                          method: 'POST',
-                          headers: { 
-                            'Content-Type': 'application/json',
-                            'x-admin-key': adminKey
-                          },
-                          body: JSON.stringify({
-                            fileBase64: base64,
-                            filename: file.name,
-                            site: siteInput.value || 'global',
-                            context: contextInput.value || 'general'
-                          })
-                        });
-                        if (res.ok) {
-                          const data = await res.json();
-                          setUploadDiagnostics({
-                            status: 'success',
-                            message: data.message || 'Document indexed successfully.',
-                            details: `Result: ${JSON.stringify(data, null, 2)}`,
-                            timestamp: new Date().toLocaleTimeString()
-                          });
-                          fetchData();
-                          form.reset();
-                        } else {
-                          const raw = await res.text();
-                          let data: any = {};
-                          try {
-                            data = JSON.parse(raw);
-                          } catch (e) {
-                            data = { error: "Non-JSON Response", details: raw };
-                          }
-                          
-                          setUploadDiagnostics({
-                            status: 'error',
-                            message: data.error || 'Indexing failed',
-                            details: data.details || JSON.stringify(data, null, 2),
-                            lastStep: data.step || 'Unknown',
-                            timestamp: new Date().toLocaleTimeString()
-                          });
-                        }
-                      } catch (err: any) {
-                        setUploadDiagnostics({
-                          status: 'error',
-                          message: 'Connection error during upload',
-                          details: err.message,
-                          timestamp: new Date().toLocaleTimeString()
-                        });
-                      } finally {
-                        setLoading(false);
-                      }
-                    };
-                    reader.readAsDataURL(file);
-                  }}
-                 >
-                   <input 
-                    name="site" 
-                    defaultValue="lexai"
-                    placeholder="Site ID (e.g. lexai)"
-                    required
-                    className="bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm focus:border-blue-500 outline-none"
-                   />
-                   <input 
-                    name="context" 
-                    placeholder="Context (e.g. legal-docs)"
-                    className="bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm focus:border-blue-500 outline-none"
-                   />
-                   <input 
-                    type="file" 
-                    name="file" 
-                    accept=".txt,.pdf,.doc,.docx"
-                    className="bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs text-slate-500 file:mr-4 file:py-1 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-500"
-                   />
-                   <button 
-                    disabled={loading}
-                    type="submit"
-                    className="bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition-all disabled:opacity-50"
-                   >
-                     {loading ? "INDEXING..." : "UPLOAD & INDEX"}
-                   </button>
-                 </form>
-               </div>
-
-               {uploadDiagnostics.status !== 'idle' && (
-                 <motion.div 
-                   initial={{ opacity: 0, y: 10 }}
-                   animate={{ opacity: 1, y: 0 }}
-                   className={`mb-10 border rounded-2xl overflow-hidden shadow-xl ${
-                     uploadDiagnostics.status === 'success' ? 'bg-emerald-500/5 border-emerald-500/20' :
-                     uploadDiagnostics.status === 'error' ? 'bg-rose-500/5 border-rose-500/20' :
-                     'bg-blue-500/5 border-blue-500/20'
-                   }`}
-                 >
-                   <div className="px-6 py-4 border-b border-slate-900 flex items-center justify-between">
-                     <div className="flex items-center gap-3">
-                       {uploadDiagnostics.status === 'loading' && <div className="w-2 h-2 bg-blue-500 rounded-full animate-ping"></div>}
-                       {uploadDiagnostics.status === 'success' && <CheckCircle2 className="w-4 h-4 text-emerald-500" />}
-                       {uploadDiagnostics.status === 'error' && <AlertCircle className="w-4 h-4 text-rose-500" />}
-                       <h4 className="text-sm font-bold text-white uppercase tracking-wider">Upload Diagnostics</h4>
-                     </div>
-                     <span className="text-[10px] text-slate-500 font-mono">{uploadDiagnostics.timestamp}</span>
-                   </div>
-                   <div className="p-6">
-                     <div className="flex flex-col gap-1 mb-4">
-                       <span className="text-xs uppercase font-bold text-slate-500 tracking-widest">General Status</span>
-                       <p className={`text-sm font-medium ${
-                         uploadDiagnostics.status === 'success' ? 'text-emerald-400' :
-                         uploadDiagnostics.status === 'error' ? 'text-rose-400' :
-                         'text-blue-400'
-                       }`}>
-                         {uploadDiagnostics.message}
-                       </p>
-                     </div>
-
-                     {uploadDiagnostics.lastStep && (
-                       <div className="flex flex-col gap-1 mb-4">
-                         <span className="text-xs uppercase font-bold text-slate-500 tracking-widest">Failure Stage</span>
-                         <div className="flex items-center gap-2 text-rose-300 font-mono text-xs bg-rose-500/10 p-2 rounded border border-rose-500/20">
-                           <span className="px-1.5 py-0.5 bg-rose-500 text-white rounded text-[10px] font-bold">STEP</span>
-                           {uploadDiagnostics.lastStep}
-                         </div>
-                       </div>
-                     )}
-
-                     {uploadDiagnostics.details && (
-                       <div className="flex flex-col gap-1">
-                         <span className="text-xs uppercase font-bold text-slate-500 tracking-widest">Technical Details</span>
-                         <pre className="text-[10px] text-slate-400 bg-slate-950 p-4 rounded-xl border border-slate-900 overflow-x-auto whitespace-pre-wrap leading-relaxed">
-                           {uploadDiagnostics.details}
-                         </pre>
-                       </div>
-                     )}
-
-                     {uploadDiagnostics.status === 'success' && (
-                       <div className="mt-2 text-xs text-emerald-500/70 italic">
-                         Optimization complete. Content is now searchable by the AI agents.
-                       </div>
-                     )}
-                   </div>
-                 </motion.div>
-               )}
-
-               <div className="bg-[#0c0c0c] border border-slate-900 rounded-2xl">
-                 <div className="p-6 border-b border-slate-900 flex justify-between items-center">
-                    <h3 className="font-bold text-white">Document Registry</h3>
-                    <div className="flex gap-3">
-                       <button className="text-xs font-bold text-slate-500 hover:text-white transition-colors">Export All</button>
-                    </div>
-                 </div>
-                 <div className="max-h-[500px] overflow-y-auto">
-                    <table className="w-full text-left border-collapse">
-                      <thead className="sticky top-0 bg-[#0c0c0c] z-10">
-                        <tr className="border-b border-slate-900 shadow-sm">
-                          <th className="p-4 text-xs font-bold text-slate-500 uppercase tracking-widest">Client</th>
-                          <th className="p-4 text-xs font-bold text-slate-500 uppercase tracking-widest">Preview</th>
-                          <th className="p-4 text-xs font-bold text-slate-500 uppercase tracking-widest text-right">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-900">
-                        {(!docs || docs.length === 0) ? (
-                          <tr>
-                            <td colSpan={3} className="p-10 text-center text-slate-500">
-                              No documents found in knowledge base
-                            </td>
-                          </tr>
-                        ) : (
-                          docs.map((doc) => (
-                            <tr key={doc.id} className="hover:bg-slate-900/50 group">
-                              <td className="p-4 align-top">
-                                <span className="px-2 py-1 bg-slate-950 border border-slate-800 rounded text-[10px] font-bold text-blue-400">
-                                  {(doc.site || (doc as any).metadata?.site || 'N/A').toUpperCase()}
-                                </span>
-                              </td>
-                              <td className="p-4">
-                                <p className="text-xs text-slate-400 line-clamp-2 max-w-md">
-                                  {doc.content}
-                                </p>
-                              </td>
-                              <td className="p-4 text-right align-middle">
-                                <button 
-                                  onClick={() => handleDeleteDoc(doc.id)}
-                                  className="text-slate-600 hover:text-rose-500 transition-colors opacity-0 group-hover:opacity-100"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </button>
-                              </td>
-                            </tr>
-                          ))
                         )}
-                      </tbody>
-                    </table>
-                 </div>
-               </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'docs' && (
+          <div>
+            <h3 className="text-2xl font-bold text-white mb-6">Statutory Document Library</h3>
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b border-slate-800 text-slate-500 text-xs uppercase">
+                    <th className="p-4">Jurisdiction</th>
+                    <th className="p-4">Legal Excerpt</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800">
+                  {docs.length === 0 ? (
+                    <tr>
+                      <td colSpan={2} className="p-8 text-center text-slate-500">No legal documents indexed yet.</td>
+                    </tr>
+                  ) : (
+                    docs.map((doc) => (
+                      <tr key={doc.id}>
+                        <td className="p-4 font-bold text-blue-400 uppercase text-xs">{doc.site || 'General'}</td>
+                        <td className="p-4 text-slate-400 text-xs line-clamp-2">{doc.content}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );
