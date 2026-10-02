@@ -2,45 +2,37 @@
   command = "npm run build"
   publish = "dist"
 
-[functions]
-  node_bundler = "esbuild"
-  external_node_modules = ["pdf-parse-debugging-disabled"]
-
 [dev]
   command = "npm run dev"
   targetPort = 5173
   port = 8888
 
-[[redirects]]
-  from = "/api/admin/*"
-  to = "/.netlify/functions/admin/:splat"
-  status = 200
-
+# All API calls now go to Supabase Edge Functions
 [[redirects]]
   from = "/api/chat"
-  to = "/.netlify/functions/chat"
+  to = "https://YOUR_PROJECT_ID.supabase.co/functions/v1/chat"
   status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/admin/*"
+  to = "https://YOUR_PROJECT_ID.supabase.co/functions/v1/admin/:splat"
+  status = 200
+  force = true
 
 [[redirects]]
   from = "/api/embed"
-  to = "/.netlify/functions/embed"
+  to = "https://YOUR_PROJECT_ID.supabase.co/functions/v1/embed"
   status = 200
+  force = true
 
-[[redirects]]
-  from = "/api/grade"
-  to = "/.netlify/functions/grade"
-  status = 200
-
-[[redirects]]
-  from = "/api/*"
-  to = "/.netlify/functions/:splat"
-  status = 200
-
+# SPA catch-all
 [[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200
 
+# Allow embedding the standalone widget
 [[headers]]
   for = "/lex-ai-embed"
   [headers.values]
