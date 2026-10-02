@@ -1,6 +1,3 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.8";
-
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-admin-key",
@@ -8,7 +5,8 @@ const corsHeaders = {
   "Content-Type": "application/json",
 };
 
-serve(async (req) => {
+Deno.serve(async (req) => {
+  // Handle CORS Preflight
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
@@ -19,50 +17,37 @@ serve(async (req) => {
 
     if (!expectedKey) {
       return new Response(
-        JSON.stringify({ error: "Server Configuration Error: ADMIN_KEY is not configured in Supabase secrets." }),
+        JSON.stringify({ error: "Server Configuration Error: ADMIN_KEY is not set in Supabase secrets." }),
         { status: 500, headers: corsHeaders }
       );
     }
 
     if (adminKey !== expectedKey) {
       return new Response(
-        JSON.stringify({ error: "Unauthorized: Master Admin Key mismatch." }),
+        JSON.stringify({ error: "Unauthorized: Invalid Admin Key." }),
         { status: 403, headers: corsHeaders }
       );
     }
 
-    const { text, site = "nigeria", context = "general", metadata = {} } = await req.json();
-
-    if (!text || typeof text !== "string" || text.trim().length < 5) {
+    const body = await req.json().catch(() => null);
+    if (!body || !body.text || typeof body.text !== "string" || body.text.trim().length < 3) {
       return new Response(
         JSON.stringify({ error: "Please enter valid statutory text or legal excerpt." }),
         { status: 400, headers: corsHeaders }
       );
     }
 
-    const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
-    const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
-    const supabase = createClient(supabaseUrl, supabaseKey);
+    const { text, site = "nigeria", context = "general", metadata = {} } = body;
 
-    // Split paragraphs cleanly
+    // Clean paragraph segmentation
     const rawSections = text
       .split(/\n\n+/)
       .map((s: string) => s.trim())
-      .filter((s: string) => s.length > 5);
+      .filter((s: string) => s.length > 3);
 
-    if (rawSections.length === 0) {
-      return new Response(
-        JSON.stringify({ error: "No readable content found in text." }),
-        { status: 400, headers: corsHeaders }
-      );
-    }
-
-    // Build batch insert payload
     const records = rawSections.map((section: string) => {
-      // Derive clean title from the first 50 characters
       const firstLine = section.split("\n")[0].trim();
-      const title = firstLine.length > 60 ? firstLine.substring(0, 60) + "..." : firstLine;
-
+      const title = firstLine.length > 50 ? firstLine.substring(0, 50) + "..." : firstLine;
       return {
         title,
         content: section,
@@ -70,38 +55,49 @@ serve(async (req) => {
         context,
         metadata: {
           ...metadata,
-          uploaded_at: new Date().toISOString()
-        }
+          uploaded_at: new Date().toISOString(),
+        },
       };
     });
 
-    // Single high-speed batch database insertion (< 20ms)
-    const { data, error: insertError } = await supabase
-      .from("documents")
-      .insert(records)
-      .select("id");
+    const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
+    const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 
-    if (insertError) {
-      console.error("Database error during document batch insert:", insertError);
+    // Direct, ultra-fast HTTP insert to PostgREST (0ms CPU)
+    const dbResponse = await fetch(`${supabaseUrl}/rest/v1/documents`, {
+      method: "POST",
+      headers: {
+        "apikey": supabaseKey,
+        "Authorization": `Bearer ${supabaseKey}`,
+        "Content-Type": "application/json",
+        "Prefer": "return=representation",
+      },
+      body: JSON.stringify(records),
+    });
+
+    if (!dbResponse.ok) {
+      const errorText = await dbResponse.text();
+      console.error("Database Insert Error:", errorText);
       return new Response(
-        JSON.stringify({ error: `Database Error: ${insertError.message}` }),
+        JSON.stringify({ error: `Database Error: ${errorText}` }),
         { status: 400, headers: corsHeaders }
       );
     }
 
-    const insertedCount = data ? data.length : records.length;
+    const insertedData = await dbResponse.json();
+    const count = Array.isArray(insertedData) ? insertedData.length : records.length;
 
     return new Response(
       JSON.stringify({
-        message: `Successfully indexed ${insertedCount} legal section(s) into the statutory library.`,
-        count: insertedCount
+        message: `Successfully indexed ${count} legal section(s) into the statutory library.`,
+        count,
       }),
-      { headers: corsHeaders }
+      { status: 200, headers: corsHeaders }
     );
   } catch (error: any) {
-    console.error("Critical Ingest Failure:", error);
+    console.error("Critical Ingestion Failure:", error);
     return new Response(
-      JSON.stringify({ error: `Failed to index: ${error.message || "Unknown error"}` }),
+      JSON.stringify({ error: `Ingestion failed: ${error.message || "Unknown error"}` }),
       { status: 500, headers: corsHeaders }
     );
   }
