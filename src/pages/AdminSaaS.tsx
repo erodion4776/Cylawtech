@@ -39,6 +39,7 @@ interface ApiKey {
 
 interface Document {
   id: string;
+  title?: string;
   content: string;
   site: string;
   context: string;
@@ -50,7 +51,6 @@ export default function AdminSaaS() {
   useDocumentTitle('LexAI - Practice Control Portal');
   const [adminKey, setAdminKey] = useState<string>(localStorage.getItem('lex_admin_key') || '');
   const [isAuth, setIsAuth] = useState(false);
-  // Start on 'home' for mobile hub dashboard
   const [activeTab, setActiveTab] = useState<AdminTab>('home');
   const [settings, setSettings] = useState<SystemConfiguration | null>(null);
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
@@ -146,6 +146,7 @@ export default function AdminSaaS() {
     setTimeout(() => setCopiedKey(null), 2000);
   };
 
+  // Ingestion to high-speed consolidated admin documents endpoint
   const handleIngestKnowledge = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!knowledgeText.trim()) return;
@@ -155,7 +156,7 @@ export default function AdminSaaS() {
     setUploadError(null);
 
     try {
-      const res = await fetch('/api/embed', {
+      const res = await fetch('/api/admin/documents', {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
@@ -165,11 +166,15 @@ export default function AdminSaaS() {
           text: knowledgeText,
           site: knowledgeJur,
           context: knowledgeContext,
-          metadata: { uploaded_at: new Date().toISOString(), source: 'Portal Ingestion' }
+          metadata: {
+            uploaded_at: new Date().toISOString(),
+            source: 'Portal Ingestion'
+          }
         })
       });
 
       const data = await res.json();
+
       if (res.ok) {
         setUploadSuccess(data.message || 'Legal insights successfully indexed.');
         setKnowledgeText('');
@@ -179,7 +184,7 @@ export default function AdminSaaS() {
         setUploadError(data.error || 'Failed to feed knowledge to AI.');
       }
     } catch {
-      setUploadError('Connection error while sending data.');
+      setUploadError('Connection error while saving knowledge.');
     } finally {
       setIsUploading(false);
     }
@@ -402,7 +407,7 @@ export default function AdminSaaS() {
         </button>
       </aside>
 
-      {/* ==================== MAIN WORKSPACE (SAFE PADDING FOR MOBILE HEADER) ==================== */}
+      {/* ==================== MAIN WORKSPACE ==================== */}
       <main className="flex-grow overflow-y-auto max-w-full pt-14 md:pt-0">
         <div className="p-4 sm:p-6 md:p-10">
 
@@ -618,18 +623,20 @@ export default function AdminSaaS() {
                     <tr className="border-b border-slate-800 text-slate-500 text-xs uppercase font-bold tracking-wider">
                       <th className="p-4">Jurisdiction</th>
                       <th className="p-4">Context</th>
+                      <th className="p-4">Title</th>
                       <th className="p-4">Legal Excerpt</th>
                       <th className="p-4 text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/60">
                     {docs.length === 0 ? (
-                      <tr><td colSpan={4} className="p-8 text-center text-slate-500">No legal documents indexed yet.</td></tr>
+                      <tr><td colSpan={5} className="p-8 text-center text-slate-500">No legal documents indexed yet.</td></tr>
                     ) : docs.map((doc) => (
                       <tr key={doc.id} className="group hover:bg-slate-950/20 transition-colors">
                         <td className="p-4 font-bold text-blue-400 uppercase text-xs">{doc.site || 'General'}</td>
                         <td className="p-4 text-slate-500 text-xs font-semibold">{doc.context || 'general'}</td>
-                        <td className="p-4 text-slate-400 text-xs line-clamp-2 max-w-lg">{doc.content}</td>
+                        <td className="p-4 text-slate-200 text-xs font-bold max-w-xs truncate">{doc.title || '—'}</td>
+                        <td className="p-4 text-slate-400 text-xs line-clamp-2 max-w-md">{doc.content}</td>
                         <td className="p-4 text-right align-middle">
                           <button
                             onClick={() => handleDeleteDocument(doc.id)}
@@ -661,6 +668,9 @@ export default function AdminSaaS() {
                         {doc.context || 'general'}
                       </span>
                     </div>
+                    {doc.title && (
+                      <p className="text-xs font-bold text-slate-200 pr-8 line-clamp-1">{doc.title}</p>
+                    )}
                     <p className="text-xs text-slate-400 leading-relaxed line-clamp-4 pr-8">
                       {doc.content}
                     </p>
