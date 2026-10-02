@@ -9,7 +9,6 @@ import {
   Plus, 
   Trash2, 
   Power, 
-  Lock, 
   CheckCircle2, 
   Copy, 
   BookOpen,
@@ -18,7 +17,10 @@ import {
   AlertCircle,
   Menu,
   X,
-  PlusCircle
+  PlusCircle,
+  ChevronRight,
+  ChevronLeft,
+  Zap
 } from 'lucide-react';
 
 interface SystemConfiguration {
@@ -42,18 +44,21 @@ interface Document {
   context: string;
 }
 
+type AdminTab = 'home' | 'settings' | 'keys' | 'docs';
+
 export default function AdminSaaS() {
   useDocumentTitle('LexAI - Practice Control Portal');
   const [adminKey, setAdminKey] = useState<string>(localStorage.getItem('lex_admin_key') || '');
   const [isAuth, setIsAuth] = useState(false);
-  const [activeTab, setActiveTab] = useState<'settings' | 'keys' | 'docs'>('settings');
+  // Start on 'home' for mobile hub dashboard
+  const [activeTab, setActiveTab] = useState<AdminTab>('home');
   const [settings, setSettings] = useState<SystemConfiguration | null>(null);
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
   const [docs, setDocs] = useState<Document[]>([]);
   const [loading, setLoading] = useState(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
-  // Layout & Interaction States
+  // Layout States
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [ingestPanelOpen, setIngestPanelOpen] = useState(false);
 
@@ -160,20 +165,16 @@ export default function AdminSaaS() {
           text: knowledgeText,
           site: knowledgeJur,
           context: knowledgeContext,
-          metadata: {
-            uploaded_at: new Date().toISOString(),
-            source: 'Manual Portal Ingestion'
-          }
+          metadata: { uploaded_at: new Date().toISOString(), source: 'Portal Ingestion' }
         })
       });
 
       const data = await res.json();
-
       if (res.ok) {
         setUploadSuccess(data.message || 'Legal insights successfully indexed.');
         setKnowledgeText('');
         fetchData();
-        setTimeout(() => setIngestPanelOpen(false), 2000);
+        setTimeout(() => setIngestPanelOpen(false), 1500);
       } else {
         setUploadError(data.error || 'Failed to feed knowledge to AI.');
       }
@@ -197,6 +198,7 @@ export default function AdminSaaS() {
     }
   };
 
+  // ======= AUTHENTICATION SCREEN =======
   if (!isAuth) {
     return (
       <div className="min-h-[100dvh] bg-slate-950 flex items-center justify-center p-4">
@@ -225,48 +227,83 @@ export default function AdminSaaS() {
     );
   }
 
+  // Available Admin Features
+  const adminFeatures = [
+    { 
+      id: 'settings' as AdminTab,
+      label: 'Practice Status', 
+      icon: SettingsIcon, 
+      desc: 'Enable or disable AI access across all legal workspaces',
+      color: 'from-emerald-500/20 to-emerald-600/5',
+      iconColor: 'text-emerald-400'
+    },
+    { 
+      id: 'keys' as AdminTab,
+      label: 'Client Firm Licenses', 
+      icon: Key, 
+      desc: 'Generate or revoke access keys for client law firms',
+      color: 'from-amber-500/20 to-amber-600/5',
+      iconColor: 'text-amber-400',
+      badge: apiKeys.filter(k => k.status === 'active').length
+    },
+    { 
+      id: 'docs' as AdminTab,
+      label: 'Statutory Library', 
+      icon: BookOpen, 
+      desc: 'Teach LexAI new statutes, case law, and legal precedents',
+      color: 'from-blue-500/20 to-blue-600/5',
+      iconColor: 'text-blue-400',
+      badge: docs.length
+    }
+  ];
+
+  const currentFeature = adminFeatures.find(f => f.id === activeTab);
+
   return (
     <div className="min-h-[100dvh] bg-slate-950 text-slate-300 flex flex-col md:flex-row font-sans relative">
 
-      {/* ==================== MOBILE NAVIGATION BAR ==================== */}
-      <header className="flex md:hidden items-center justify-between px-4 py-3 bg-slate-900/90 border-b border-slate-800 sticky top-0 z-40 backdrop-blur-md">
-        <div className="flex items-center gap-2">
-          <div className="w-7 h-7 bg-blue-600 rounded flex items-center justify-center text-white font-black text-xs">LA</div>
-          <span className="font-bold text-white text-sm">Counsel Admin</span>
+      {/* ==================== STICKY MOBILE NAVIGATION BAR ==================== */}
+      <header className="flex md:hidden items-center justify-between px-4 py-3 bg-slate-900/95 border-b border-slate-800 fixed top-0 inset-x-0 z-40 backdrop-blur-md h-14">
+        <div className="flex items-center gap-2 min-w-0">
+          {activeTab !== 'home' ? (
+            <button
+              onClick={() => setActiveTab('home')}
+              className="p-1.5 -ml-1 rounded-lg hover:bg-slate-800 text-slate-300 bg-transparent border-0 cursor-pointer transition-colors shrink-0"
+            >
+              <ChevronLeft size={20} />
+            </button>
+          ) : (
+            <div className="w-7 h-7 bg-blue-600 rounded flex items-center justify-center text-white font-black text-xs shrink-0">LA</div>
+          )}
+          <span className="font-bold text-white text-sm truncate">
+            {activeTab === 'home' ? 'Counsel Admin' : currentFeature?.label}
+          </span>
         </div>
         <button
           onClick={() => setSidebarOpen(!sidebarOpen)}
-          className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-white border-0 cursor-pointer transition-colors"
+          className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-white border-0 cursor-pointer transition-colors shrink-0"
         >
           {sidebarOpen ? <X size={18} /> : <Menu size={18} />}
         </button>
       </header>
 
-      {/* ==================== RESPONSIVE SIDEBAR / DRAW PANEL ==================== */}
+      {/* ==================== DESKTOP SIDEBAR / MOBILE DRAWER ==================== */}
       <AnimatePresence>
-        {(sidebarOpen || window.innerWidth >= 768) && (
+        {sidebarOpen && (
           <>
-            {/* Backdrop for Mobile */}
-            {sidebarOpen && (
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                onClick={() => setSidebarOpen(false)}
-                className="fixed inset-0 z-40 bg-black/60 backdrop-blur-xs md:hidden"
-              />
-            )}
-
-            {/* Sidebar Shell */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setSidebarOpen(false)}
+              className="fixed inset-0 z-40 bg-black/60 backdrop-blur-xs md:hidden"
+            />
             <motion.aside
               initial={{ x: '-100%' }}
               animate={{ x: 0 }}
               exit={{ x: '-100%' }}
               transition={{ type: 'spring', damping: 26, stiffness: 220 }}
-              className={cn(
-                "fixed top-0 bottom-0 left-0 w-64 bg-[#0c0d12] border-r border-slate-900 p-6 flex flex-col justify-between z-50 md:sticky md:top-0 md:h-screen shrink-0 transition-transform md:translate-x-0",
-                !sidebarOpen && "hidden md:flex"
-              )}
+              className="fixed top-0 bottom-0 left-0 w-72 bg-[#0c0d12] border-r border-slate-900 p-6 flex flex-col justify-between z-50 md:hidden shadow-2xl"
             >
               <div>
                 <div className="flex items-center justify-between mb-8">
@@ -276,26 +313,28 @@ export default function AdminSaaS() {
                   </div>
                   <button 
                     onClick={() => setSidebarOpen(false)}
-                    className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white md:hidden bg-transparent border-0 cursor-pointer"
+                    className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white bg-transparent border-0 cursor-pointer"
                   >
                     <X size={18} />
                   </button>
                 </div>
 
                 <nav className="space-y-1">
-                  {[
-                    { id: 'settings', label: 'Practice Status', icon: SettingsIcon },
-                    { id: 'keys', label: 'Client Firm Keys', icon: Key },
-                    { id: 'docs', label: 'Statutory Library', icon: BookOpen },
-                  ].map((tab) => (
+                  <button
+                    onClick={() => { setActiveTab('home'); setSidebarOpen(false); }}
+                    className={cn(
+                      'w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-colors border-0 bg-transparent text-left cursor-pointer',
+                      activeTab === 'home' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:bg-slate-900'
+                    )}
+                  >
+                    <Zap size={15} /> Dashboard Hub
+                  </button>
+                  {adminFeatures.map((tab) => (
                     <button
                       key={tab.id}
-                      onClick={() => {
-                        setActiveTab(tab.id as any);
-                        setSidebarOpen(false);
-                      }}
+                      onClick={() => { setActiveTab(tab.id); setSidebarOpen(false); }}
                       className={cn(
-                        'w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-colors border-0 bg-transparent text-left cursor-pointer active:scale-98',
+                        'w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-colors border-0 bg-transparent text-left cursor-pointer',
                         activeTab === tab.id ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:bg-slate-900'
                       )}
                     >
@@ -319,327 +358,246 @@ export default function AdminSaaS() {
         )}
       </AnimatePresence>
 
-      {/* ==================== MAIN WORKSPACE ==================== */}
-      <main className="flex-grow p-4 sm:p-6 md:p-10 overflow-y-auto max-w-full">
-        
-        {/* ==================== TAB: SETTINGS ==================== */}
-        {activeTab === 'settings' && (
-          <div className="max-w-xl mx-auto space-y-6">
-            <h3 className="text-xl sm:text-2xl font-black text-white tracking-tight">Practice Status</h3>
-            <div className="bg-slate-900 border border-slate-800 p-5 sm:p-6 rounded-3xl flex flex-col sm:flex-row gap-4 sm:items-center sm:justify-between shadow-xl">
-              <div>
-                <h4 className="font-bold text-white text-sm sm:text-base">Global AI Intelligence Access</h4>
-                <p className="text-xs text-slate-400 mt-0.5">Toggle instant availability across all legal workspaces</p>
-              </div>
+      {/* ==================== DESKTOP PERMANENT SIDEBAR ==================== */}
+      <aside className="hidden md:flex sticky top-0 h-screen w-64 bg-[#0c0d12] border-r border-slate-900 p-6 flex-col justify-between shrink-0">
+        <div>
+          <div className="flex items-center gap-2 mb-8">
+            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-black text-sm">LA</div>
+            <span className="font-bold text-white text-base">Counsel Admin</span>
+          </div>
+
+          <nav className="space-y-1">
+            <button
+              onClick={() => setActiveTab('home')}
+              className={cn(
+                'w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-colors border-0 bg-transparent text-left cursor-pointer',
+                activeTab === 'home' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:bg-slate-900'
+              )}
+            >
+              <Zap size={15} /> Dashboard Hub
+            </button>
+            {adminFeatures.map((tab) => (
               <button
-                onClick={handleToggleSystem}
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
                 className={cn(
-                  "w-12 h-6.5 rounded-full transition-colors relative border-0 cursor-pointer self-start sm:self-auto shrink-0", 
-                  settings?.api_enabled ? 'bg-emerald-600' : 'bg-slate-700'
+                  'w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-colors border-0 bg-transparent text-left cursor-pointer',
+                  activeTab === tab.id ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:bg-slate-900'
                 )}
               >
-                <div className={cn("w-4.5 h-4.5 bg-white rounded-full absolute top-1 transition-all", settings?.api_enabled ? 'left-6' : 'left-1')} />
+                <tab.icon size={15} /> {tab.label}
               </button>
-            </div>
-          </div>
-        )}
+            ))}
+          </nav>
+        </div>
 
-        {/* ==================== TAB: KEYS ==================== */}
-        {activeTab === 'keys' && (
-          <div className="max-w-4xl mx-auto space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <h3 className="text-xl sm:text-2xl font-black text-white tracking-tight">Client Firm Licenses</h3>
-              <button 
-                onClick={handleCreateKey} 
-                className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-3 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-2 border-0 cursor-pointer active:scale-95 transition-all shadow-lg"
-              >
-                <Plus size={15} /> New Client License
-              </button>
-            </div>
+        <button
+          onClick={() => {
+            localStorage.removeItem('lex_admin_key');
+            window.location.reload();
+          }}
+          className="flex items-center gap-2.5 text-xs font-bold text-slate-500 hover:text-rose-400 bg-transparent border-0 cursor-pointer py-2 px-3 hover:bg-rose-500/10 rounded-xl transition-all"
+        >
+          <Power size={13} /> SIGN OUT
+        </button>
+      </aside>
 
-            {/* Desktop Table View */}
-            <div className="hidden sm:block bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-xl">
-              <table className="w-full text-left text-sm">
-                <thead>
-                  <tr className="border-b border-slate-800 text-slate-500 text-xs uppercase font-bold tracking-wider">
-                    <th className="p-4">Firm / Client</th>
-                    <th className="p-4">Access Key</th>
-                    <th className="p-4">Status</th>
-                    <th className="p-4 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/60">
-                  {apiKeys.map((k) => (
-                    <tr key={k.id} className="hover:bg-slate-950/25 transition-colors">
-                      <td className="p-4 font-bold text-white">{k.site}</td>
-                      <td className="p-4 font-mono text-xs text-slate-400">
-                        {k.key.substring(0, 10)}••••••••••
-                        <button onClick={() => handleCopyKey(k.key)} className="ml-2 text-slate-500 hover:text-white inline bg-transparent border-0 cursor-pointer">
-                          {copiedKey === k.key ? <CheckCircle2 size={12} className="inline text-emerald-400 animate-pulse" /> : <Copy size={12} className="inline" />}
-                        </button>
-                      </td>
-                      <td className="p-4">
-                        <span className={cn('px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase border', k.status === 'active' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/25' : 'bg-rose-500/10 text-rose-400 border-rose-500/25')}>
-                          {k.status}
-                        </span>
-                      </td>
-                      <td className="p-4 text-right">
-                        {k.status === 'active' && (
-                          <button onClick={() => handleRevokeKey(k.id)} className="text-rose-400 hover:text-rose-300 hover:underline text-xs font-bold bg-transparent border-0 cursor-pointer">
-                            Revoke
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+      {/* ==================== MAIN WORKSPACE (SAFE PADDING FOR MOBILE HEADER) ==================== */}
+      <main className="flex-grow overflow-y-auto max-w-full pt-14 md:pt-0">
+        <div className="p-4 sm:p-6 md:p-10">
 
-            {/* Mobile Card View */}
-            <div className="block sm:hidden space-y-3">
-              {apiKeys.map((k) => (
-                <div key={k.id} className="bg-slate-900 border border-slate-800 p-4 rounded-2xl space-y-3 relative shadow-md">
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-white text-sm">{k.site}</span>
-                    <span className={cn('px-2 py-0.5 rounded-full text-[9px] font-bold uppercase border', k.status === 'active' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/25' : 'bg-rose-500/10 text-rose-400 border-rose-500/25')}>
-                      {k.status}
-                    </span>
-                  </div>
-                  <div className="bg-slate-950 p-2.5 rounded-xl flex items-center justify-between border border-slate-800/50">
-                    <code className="font-mono text-[10px] text-slate-400">{k.key.substring(0, 10)}••••••••••</code>
-                    <button onClick={() => handleCopyKey(k.key)} className="text-slate-500 hover:text-white bg-transparent border-0 cursor-pointer">
-                      {copiedKey === k.key ? <CheckCircle2 size={13} className="text-emerald-400" /> : <Copy size={13} />}
-                    </button>
-                  </div>
-                  {k.status === 'active' && (
-                    <button 
-                      onClick={() => handleRevokeKey(k.id)} 
-                      className="w-full py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-xl text-xs font-bold border-0 cursor-pointer transition-all"
-                    >
-                      Revoke Firm Access
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* ==================== TAB: DOCS (KNOWLEDGE LIBRARY) ==================== */}
-        {activeTab === 'docs' && (
-          <div className="max-w-4xl mx-auto space-y-6">
-            
-            {/* Library Header & Open Ingestion Button */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          {/* ==================== DASHBOARD HUB (MOBILE HOME) ==================== */}
+          {activeTab === 'home' && (
+            <motion.div 
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="max-w-4xl mx-auto space-y-6"
+            >
               <div>
-                <h3 className="text-xl sm:text-2xl font-black text-white tracking-tight">Statutory Library</h3>
-                <p className="text-xs text-slate-400 mt-1">Manage and audit indexed statutory provisions and case precedents</p>
+                <h3 className="text-2xl sm:text-3xl font-black text-white tracking-tight">Welcome, Counsel</h3>
+                <p className="text-xs sm:text-sm text-slate-400 mt-1.5">Select a workspace to manage your intelligence platform.</p>
               </div>
-              <button 
-                onClick={() => {
-                  setUploadSuccess(null);
-                  setUploadError(null);
-                  setIngestPanelOpen(true);
-                }}
-                className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-3.5 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-2 border-0 cursor-pointer active:scale-95 transition-all shadow-lg shadow-blue-600/15"
-              >
-                <PlusCircle size={15} /> Teach LexAI New Knowledge
-              </button>
-            </div>
 
-            {/* Document Library Table/Cards list */}
-            <div className="space-y-4">
-              {/* Desktop Table View */}
+              {/* Status Card */}
+              <div className={cn("p-5 rounded-3xl border flex items-center gap-4 shadow-xl", settings?.api_enabled ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-rose-500/5 border-rose-500/20')}>
+                <div className={cn("w-11 h-11 rounded-2xl flex items-center justify-center shrink-0", settings?.api_enabled ? 'bg-emerald-500/15' : 'bg-rose-500/15')}>
+                  <Zap size={20} className={settings?.api_enabled ? 'text-emerald-400' : 'text-rose-400'} />
+                </div>
+                <div className="min-w-0 flex-grow">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">System Status</p>
+                  <p className={cn("text-base font-bold", settings?.api_enabled ? 'text-emerald-400' : 'text-rose-400')}>
+                    {settings?.api_enabled ? 'Live and Accepting Queries' : 'Platform Offline'}
+                  </p>
+                </div>
+                <button
+                  onClick={handleToggleSystem}
+                  className={cn("w-11 h-6 rounded-full relative border-0 cursor-pointer shrink-0 transition-colors", settings?.api_enabled ? 'bg-emerald-500' : 'bg-slate-700')}
+                >
+                  <div className={cn("w-4 h-4 bg-white rounded-full absolute top-1 transition-all", settings?.api_enabled ? 'left-6' : 'left-1')} />
+                </button>
+              </div>
+
+              {/* Admin Feature Cards (Hub Grid) */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {adminFeatures.map((feature) => (
+                  <button
+                    key={feature.id}
+                    onClick={() => setActiveTab(feature.id)}
+                    className={cn("relative p-5 rounded-3xl bg-gradient-to-br border border-slate-800 text-left cursor-pointer transition-all hover:border-slate-700 hover:scale-[1.01] active:scale-[0.98] group overflow-hidden", feature.color)}
+                  >
+                    <div className="flex items-start justify-between mb-4">
+                      <div className={cn("w-11 h-11 rounded-2xl bg-slate-950/80 border border-slate-800 flex items-center justify-center", feature.iconColor)}>
+                        <feature.icon size={20} />
+                      </div>
+                      {feature.badge !== undefined && (
+                        <span className="text-[10px] font-bold text-slate-500 bg-slate-950 border border-slate-800 px-2 py-0.5 rounded-full">
+                          {feature.badge} total
+                        </span>
+                      )}
+                    </div>
+                    <h4 className="font-bold text-white text-sm sm:text-base mb-1">{feature.label}</h4>
+                    <p className="text-xs text-slate-400 leading-relaxed">{feature.desc}</p>
+                    <ChevronRight size={16} className="absolute right-5 bottom-5 text-slate-600 group-hover:text-white group-hover:translate-x-1 transition-all" />
+                  </button>
+                ))}
+              </div>
+            </motion.div>
+          )}
+
+          {/* ==================== TAB: PRACTICE STATUS ==================== */}
+          {activeTab === 'settings' && (
+            <motion.div 
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="max-w-xl mx-auto space-y-6"
+            >
+              <div className="hidden md:block">
+                <h3 className="text-xl sm:text-2xl font-black text-white tracking-tight">Practice Status</h3>
+                <p className="text-xs text-slate-400 mt-1">Control AI availability across the LexAI platform</p>
+              </div>
+
+              <div className="bg-slate-900 border border-slate-800 p-5 sm:p-6 rounded-3xl flex flex-col sm:flex-row gap-4 sm:items-center sm:justify-between shadow-xl">
+                <div>
+                  <h4 className="font-bold text-white text-sm sm:text-base">Global AI Intelligence Access</h4>
+                  <p className="text-xs text-slate-400 mt-0.5">Toggle instant availability across all legal workspaces</p>
+                </div>
+                <button
+                  onClick={handleToggleSystem}
+                  className={cn("w-12 h-6.5 rounded-full transition-colors relative border-0 cursor-pointer self-start sm:self-auto shrink-0", settings?.api_enabled ? 'bg-emerald-600' : 'bg-slate-700')}
+                >
+                  <div className={cn("w-4.5 h-4.5 bg-white rounded-full absolute top-1 transition-all", settings?.api_enabled ? 'left-6' : 'left-1')} />
+                </button>
+              </div>
+            </motion.div>
+          )}
+
+          {/* ==================== TAB: CLIENT KEYS ==================== */}
+          {activeTab === 'keys' && (
+            <motion.div 
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="max-w-4xl mx-auto space-y-6"
+            >
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="hidden md:block">
+                  <h3 className="text-xl sm:text-2xl font-black text-white tracking-tight">Client Firm Licenses</h3>
+                  <p className="text-xs text-slate-400 mt-1">Issue or revoke firm-level access keys</p>
+                </div>
+                <button 
+                  onClick={handleCreateKey} 
+                  className="w-full sm:w-auto bg-blue-600 hover:bg-blue-500 text-white px-4 py-3 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-2 border-0 cursor-pointer active:scale-95 transition-all shadow-lg"
+                >
+                  <Plus size={15} /> New Client License
+                </button>
+              </div>
+
+              {/* Desktop Table */}
               <div className="hidden sm:block bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-xl">
                 <table className="w-full text-left text-sm">
                   <thead>
                     <tr className="border-b border-slate-800 text-slate-500 text-xs uppercase font-bold tracking-wider">
-                      <th className="p-4">Jurisdiction</th>
-                      <th className="p-4">Context</th>
-                      <th className="p-4">Legal Excerpt</th>
+                      <th className="p-4">Firm / Client</th>
+                      <th className="p-4">Access Key</th>
+                      <th className="p-4">Status</th>
                       <th className="p-4 text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/60">
-                    {docs.length === 0 ? (
-                      <tr>
-                        <td colSpan={4} className="p-8 text-center text-slate-500">No legal documents indexed yet.</td>
-                      </tr>
-                    ) : (
-                      docs.map((doc) => (
-                        <tr key={doc.id} className="group hover:bg-slate-950/20 transition-colors">
-                          <td className="p-4 font-bold text-blue-400 uppercase text-xs">{doc.site || 'General'}</td>
-                          <td className="p-4 text-slate-500 text-xs font-semibold">{doc.context || 'general'}</td>
-                          <td className="p-4 text-slate-400 text-xs line-clamp-2 max-w-lg">{doc.content}</td>
-                          <td className="p-4 text-right align-middle">
-                            <button
-                              onClick={() => handleDeleteDocument(doc.id)}
-                              className="text-slate-600 hover:text-rose-400 p-2 transition-colors opacity-0 group-hover:opacity-100 bg-transparent border-0 cursor-pointer"
-                            >
-                              <Trash2 size={14} />
+                    {apiKeys.length === 0 ? (
+                      <tr><td colSpan={4} className="p-8 text-center text-slate-500">No client licenses issued yet.</td></tr>
+                    ) : apiKeys.map((k) => (
+                      <tr key={k.id} className="hover:bg-slate-950/25 transition-colors">
+                        <td className="p-4 font-bold text-white">{k.site}</td>
+                        <td className="p-4 font-mono text-xs text-slate-400">
+                          {k.key.substring(0, 10)}••••••••••
+                          <button onClick={() => handleCopyKey(k.key)} className="ml-2 text-slate-500 hover:text-white inline bg-transparent border-0 cursor-pointer">
+                            {copiedKey === k.key ? <CheckCircle2 size={12} className="inline text-emerald-400 animate-pulse" /> : <Copy size={12} className="inline" />}
+                          </button>
+                        </td>
+                        <td className="p-4">
+                          <span className={cn('px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase border', k.status === 'active' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/25' : 'bg-rose-500/10 text-rose-400 border-rose-500/25')}>
+                            {k.status}
+                          </span>
+                        </td>
+                        <td className="p-4 text-right">
+                          {k.status === 'active' && (
+                            <button onClick={() => handleRevokeKey(k.id)} className="text-rose-400 hover:text-rose-300 hover:underline text-xs font-bold bg-transparent border-0 cursor-pointer">
+                              Revoke
                             </button>
-                          </td>
-                        </tr>
-                      ))
-                    )}
+                          )}
+                        </td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
 
-              {/* Mobile Card List View */}
+              {/* Mobile Cards */}
               <div className="block sm:hidden space-y-3">
-                {docs.length === 0 ? (
-                  <p className="text-xs text-slate-500 text-center py-6">No legal documents indexed yet.</p>
-                ) : (
-                  docs.map((doc) => (
-                    <div key={doc.id} className="bg-slate-900 border border-slate-800 p-4 rounded-2xl space-y-2.5 relative shadow-md">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[10px] font-bold text-blue-400 uppercase tracking-wide bg-blue-500/10 px-2 py-0.5 rounded border border-blue-500/20">
-                          {doc.site || 'General'}
-                        </span>
-                        <span className="text-[10px] font-semibold text-slate-500">
-                          {doc.context || 'general'}
-                        </span>
-                      </div>
-                      <p className="text-xs text-slate-400 leading-relaxed line-clamp-4 pr-6">
-                        {doc.content}
-                      </p>
-                      <button
-                        onClick={() => handleDeleteDocument(doc.id)}
-                        className="absolute right-3 bottom-3 p-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 hover:text-rose-300 rounded-xl border-0 cursor-pointer transition-all"
-                      >
-                        <Trash2 size={13} />
+                {apiKeys.length === 0 ? (
+                  <div className="bg-slate-900 border border-slate-800 p-8 rounded-2xl text-center">
+                    <Key size={28} className="mx-auto mb-3 text-slate-600" />
+                    <p className="text-xs text-slate-500">No client licenses issued yet.</p>
+                  </div>
+                ) : apiKeys.map((k) => (
+                  <div key={k.id} className="bg-slate-900 border border-slate-800 p-4 rounded-2xl space-y-3 shadow-md">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-white text-sm truncate pr-2">{k.site}</span>
+                      <span className={cn('px-2 py-0.5 rounded-full text-[9px] font-bold uppercase border shrink-0', k.status === 'active' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/25' : 'bg-rose-500/10 text-rose-400 border-rose-500/25')}>
+                        {k.status}
+                      </span>
+                    </div>
+                    <div className="bg-slate-950 p-2.5 rounded-xl flex items-center justify-between border border-slate-800/50">
+                      <code className="font-mono text-[10px] text-slate-400 truncate pr-2">{k.key.substring(0, 10)}••••••••••</code>
+                      <button onClick={() => handleCopyKey(k.key)} className="text-slate-500 hover:text-white bg-transparent border-0 cursor-pointer shrink-0">
+                        {copiedKey === k.key ? <CheckCircle2 size={13} className="text-emerald-400" /> : <Copy size={13} />}
                       </button>
                     </div>
-                  ))
-                )}
+                    {k.status === 'active' && (
+                      <button 
+                        onClick={() => handleRevokeKey(k.id)} 
+                        className="w-full py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-xl text-xs font-bold border-0 cursor-pointer transition-all"
+                      >
+                        Revoke Firm Access
+                      </button>
+                    )}
+                  </div>
+                ))}
               </div>
-            </div>
+            </motion.div>
+          )}
 
-            {/* ==================== RESPONSIVE KNOWLEDGE INGESTION SLIDE-OVER PANEL ==================== */}
-            <AnimatePresence>
-              {ingestPanelOpen && (
-                <>
-                  {/* Backdrop */}
-                  <motion.div
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    onClick={() => {
-                      if (!isUploading) setIngestPanelOpen(false);
-                    }}
-                    className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-xs"
-                  />
-
-                  {/* Panel Sheet */}
-                  <motion.div
-                    initial={{ x: '100%' }}
-                    animate={{ x: 0 }}
-                    exit={{ x: '100%' }}
-                    transition={{ type: 'spring', damping: 28, stiffness: 220 }}
-                    className="fixed top-0 bottom-0 right-0 w-full sm:max-w-lg bg-slate-900 border-l border-slate-800 p-6 flex flex-col justify-between z-[110] shadow-2xl safe-area-inset-right"
-                  >
-                    {/* Panel Header */}
-                    <div className="flex items-center justify-between pb-4 border-b border-slate-800">
-                      <div className="flex items-center gap-2.5">
-                        <UploadCloud className="text-blue-500" size={20} />
-                        <h4 className="font-bold text-white text-base">Teach LexAI New Knowledge</h4>
-                      </div>
-                      <button
-                        onClick={() => setIngestPanelOpen(false)}
-                        className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white bg-transparent border-0 cursor-pointer transition-colors"
-                      >
-                        <X size={18} />
-                      </button>
-                    </div>
-
-                    {/* Scrollable Form Body */}
-                    <div className="flex-grow overflow-y-auto py-6 space-y-5 pr-1">
-                      <p className="text-xs text-slate-400 leading-relaxed">
-                        Input statutes, precedents, or structural rules. The ingestion engine automatically segments and registers the input directly into the statutory library.
-                      </p>
-
-                      <form onSubmit={handleIngestKnowledge} className="space-y-4">
-                        <div className="flex flex-col gap-1.5">
-                          <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Jurisdiction Limit</label>
-                          <select
-                            value={knowledgeJur}
-                            onChange={(e) => setKnowledgeJurisdiction(e.target.value)}
-                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3.5 text-xs sm:text-sm text-slate-200 focus:ring-2 focus:ring-blue-500 outline-none cursor-pointer"
-                          >
-                            <option value="nigeria">🇳🇬 Nigerian Law Library</option>
-                            <option value="us">🇺🇸 US Federal Law Library</option>
-                            <option value="global">🌐 General Legal Principles</option>
-                          </select>
-                        </div>
-
-                        <div className="flex flex-col gap-1.5">
-                          <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Legal Context Code</label>
-                          <input
-                            type="text"
-                            value={knowledgeContext}
-                            onChange={(e) => setKnowledgeContext(e.target.value)}
-                            placeholder="e.g. corporate-tax, contract-disputes"
-                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3.5 text-xs sm:text-sm text-slate-200 focus:ring-2 focus:ring-blue-500 outline-none"
-                          />
-                        </div>
-
-                        <div className="flex flex-col gap-1.5">
-                          <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Statutes / Legal Content Text</label>
-                          <textarea
-                            rows={8}
-                            value={knowledgeText}
-                            onChange={(e) => setKnowledgeText(e.target.value)}
-                            placeholder="Paste legislative clauses, direct citations, standard contract sections, or litigation reasoning..."
-                            className="w-full bg-slate-950 border border-slate-800 rounded-2xl px-4 py-3.5 text-xs sm:text-sm text-slate-200 focus:ring-2 focus:ring-blue-500 outline-none resize-none leading-relaxed"
-                          />
-                        </div>
-
-                        {uploadSuccess && (
-                          <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-xl flex items-center gap-2 text-xs">
-                            <CheckCircle2 size={14} />
-                            <span>{uploadSuccess}</span>
-                          </div>
-                        )}
-
-                        {uploadError && (
-                          <div className="p-3 bg-rose-500/10 border border-rose-500/20 text-rose-400 rounded-xl flex items-center gap-2 text-xs">
-                            <AlertCircle size={14} />
-                            <span>{uploadError}</span>
-                          </div>
-                        )}
-                      </form>
-                    </div>
-
-                    {/* Bottom Action Drawer */}
-                    <div className="pt-4 border-t border-slate-800 flex gap-2">
-                      <button
-                        onClick={() => setIngestPanelOpen(false)}
-                        className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold border-0 cursor-pointer transition-colors"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        onClick={handleIngestKnowledge}
-                        disabled={isUploading || !knowledgeText.trim()}
-                        className="flex-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white font-bold py-3 rounded-xl text-xs flex items-center justify-center gap-2 border-0 cursor-pointer active:scale-97 transition-all shadow-lg"
-                      >
-                        {isUploading ? (
-                          <><Loader2 size={14} className="animate-spin" /> Indexing Library...</>
-                        ) : (
-                          'Feed Knowledge'
-                        )}
-                      </button>
-                    </div>
-                  </motion.div>
-                </>
-              )}
-            </AnimatePresence>
-
-          </div>
-        )}
-      </main>
-    </div>
-  );
-}
+          {/* ==================== TAB: STATUTORY LIBRARY ==================== */}
+          {activeTab === 'docs' && (
+            <motion.div 
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="max-w-4xl mx-auto space-y-6"
+            >
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="hidden md:block">
+                  <h3 className="text-xl sm:text-2xl font-black text-white tracking-tight">Statutory Library</h3>
+                  <p className="text-xs text-slate-400 mt-1">Manage indexed statutory provisions and case precedents</p>
+                </div>
+                <button 
+                  onClick={() 
