@@ -1,312 +1,382 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { 
-  BookOpen, Brain, Dumbbell, ArrowRight, Sparkles, 
-  Lock, Loader2, Globe, Scale, Send, ShoppingBag, 
-  SplitSquareVertical
+import {
+  Plus, Send, Loader2, MessageSquare, Trash2,
+  Scale, Globe, BookOpen, Brain, Dumbbell, Menu, X
 } from 'lucide-react';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import { cn } from '../lib/utils';
-import { Link } from 'react-router-dom';
 import Markdown from 'react-markdown';
-import TipTapEditor from '../components/TipTapEditor';
+
+const API_BASE = '/api/chat';
+
+interface Conversation {
+  id: string;
+  title: string;
+  jurisdiction: string;
+  mode: string;
+  updated_at: string;
+}
+
+interface Message {
+  id?: string;
+  role: 'user' | 'assistant';
+  content: string;
+}
 
 const LexAI: React.FC = () => {
-  useDocumentTitle('LexAI Workspace - Legal Intelligence Studio');
-  
-  const [mode, setMode] = useState<'prep' | 'training' | 'practice'>('training');
+  useDocumentTitle('LexAI - Legal Intelligence');
+
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [activeConvId, setActiveConvId] = useState<string | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [input, setInput] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
   const [jurisdiction, setJurisdiction] = useState<'nigeria' | 'us'>('nigeria');
-  const [editorOpen, setEditorOpen] = useState(true);
-  
-  // Usage tracking
-  const [usageCount, setUsageCount] = useState<number>(() => {
-    const saved = localStorage.getItem('lexai_usage');
-    return saved ? parseInt(saved, 10) : 0;
-  });
-  const [showPaywall, setShowPaywall] = useState(false);
+  const [mode, setMode] = useState<'prep' | 'training' | 'practice'>('prep');
+  const [sidebarOpen, setSidebarOpen] = useState(true);
 
-  // Drafting Canvas Content
-  const [editorContent, setEditorContent] = useState<string>(
-    '<h2>Legal Memorandum</h2><p><strong>ISSUE:</strong> State the key legal issue here.</p><p><strong>APPLICABLE RULE:</strong> Cite relevant statutory provisions and case law.</p><p><strong>ANALYSIS:</strong> Apply the statutory rules to the factual circumstances.</p><p><strong>CONCLUSION:</strong> Formulate the final professional opinion.</p>'
-  );
-
-  // Chat State
-  const [chatMessage, setChatMessage] = useState('');
-  const [chatHistory, setChatHistory] = useState<Array<{
-    role: 'user' | 'ai';
-    content: string;
-    suggestedResource?: any;
-  }>>([
-    { 
-      role: 'ai', 
-      content: "Welcome to **LexAI Legal Studio**. I am your automated legal research partner configured for **Nigerian Law**. Ask any legal question, explore statutory frameworks, or request feedback on your draft." 
-    }
-  ]);
-  const [isChatting, setIsChatting] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  const scrollToBottom = useCallback(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, []);
 
   useEffect(() => {
-    localStorage.setItem('lexai_usage', usageCount.toString());
-  }, [usageCount]);
+    scrollToBottom();
+  }, [messages, isLoading, scrollToBottom]);
 
+  // Load conversation list on mount
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [chatHistory, isChatting]);
+    fetchConversations();
+  }, []);
 
-  const handleChat = async () => {
-    if (!chatMessage.trim() || isChatting) return;
-
-    if (usageCount >= 5) {
-      setShowPaywall(true);
-      return;
-    }
-
-    const userText = chatMessage;
-    setChatMessage('');
-    setChatHistory(prev => [...prev, { role: 'user', content: userText }]);
-    setIsChatting(true);
-    setUsageCount(prev => prev + 1);
-
+  const fetchConversations = async () => {
     try {
-      // Connects to the Supabase Edge Function or proxy
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          message: userText,
-          site: 'lexai',
-          jurisdiction: jurisdiction === 'nigeria' ? 'Nigerian Law' : 'US Federal Law',
-          stage: mode,
-          editorContent: mode === 'training' ? editorContent : undefined
-        })
-      });
-
+      const res = await fetch(`${API_BASE}?action=list`);
       const data = await res.json();
-      if (!res.ok || data.error) {
-        throw new Error(data.error || 'Legal intelligence service temporarily unavailable.');
-      }
-
-      let suggestedResource = null;
-      const lower = userText.toLowerCase();
-      if (lower.includes("incorporat") || lower.includes("tax") || lower.includes("contract") || lower.includes("guide")) {
-        suggestedResource = {
-          title: "Legal Drafting & Practice Framework",
-          price: "$49.99",
-          desc: "Complete collection of verified precedent agreements and statutory guidelines.",
-          link: "/contact"
-        };
-      }
-
-      setChatHistory(prev => [...prev, { 
-        role: 'ai', 
-        content: data.response, 
-        suggestedResource 
-      }]);
-    } catch (err: any) {
-      setChatHistory(prev => [...prev, { 
-        role: 'ai', 
-        content: `${err.message || 'Unable to connect to the legal intelligence engine. Please try again.'}` 
-      }]);
-    } finally {
-      setIsChatting(false);
+      setConversations(data.conversations || []);
+    } catch (e) {
+      console.error('Failed to load conversations');
     }
   };
 
+  const loadConversation = async (convId: string) => {
+    setActiveConvId(convId);
+    setMessages([]);
+    try {
+      const res = await fetch(`${API_BASE}?action=history`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conversation_id: convId }),
+      });
+      const data = await res.json();
+      setMessages(data.messages || []);
+    } catch (e) {
+      console.error('Failed to load messages');
+    }
+  };
+
+  const startNewChat = () => {
+    setActiveConvId(null);
+    setMessages([]);
+    setInput('');
+    inputRef.current?.focus();
+  };
+
+  const deleteConversation = async (convId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    await fetch(`${API_BASE}?action=delete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ conversation_id: convId }),
+    });
+    if (activeConvId === convId) startNewChat();
+    fetchConversations();
+  };
+
+  const sendMessage = async () => {
+    if (!input.trim() || isLoading) return;
+
+    const userMessage = input.trim();
+    setInput('');
+    setMessages(prev => [...prev, { role: 'user', content: userMessage }]);
+    setIsLoading(true);
+
+    try {
+      const res = await fetch(API_BASE, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: userMessage,
+          conversation_id: activeConvId,
+          jurisdiction: jurisdiction === 'nigeria' ? 'Nigerian Law' : 'US Federal Law',
+          mode,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (data.error) {
+        setMessages(prev => [...prev, { role: 'assistant', content: data.error }]);
+      } else {
+        setMessages(prev => [...prev, { role: 'assistant', content: data.response }]);
+        if (data.conversation_id && !activeConvId) {
+          setActiveConvId(data.conversation_id);
+        }
+        fetchConversations();
+      }
+    } catch {
+      setMessages(prev => [
+        ...prev,
+        { role: 'assistant', content: 'Unable to connect to the legal intelligence service. Please try again.' },
+      ]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const jurLabel = jurisdiction === 'nigeria' ? 'Nigerian Law' : 'US Law';
+  const modeLabel = mode === 'prep' ? 'IRAC Prep' : mode === 'training' ? 'Draft Critique' : 'Clause Drafting';
+
   return (
-    <div className="pt-20 min-h-screen bg-slate-50 flex flex-col relative">
-      {/* Subscription Paywall Modal */}
+    <div className="h-screen flex bg-[#f9fafb] overflow-hidden">
+      {/* ==================== SIDEBAR ==================== */}
       <AnimatePresence>
-        {showPaywall && (
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-slate-900/60 backdrop-blur-md"
+        {sidebarOpen && (
+          <motion.aside
+            initial={{ x: -280 }}
+            animate={{ x: 0 }}
+            exit={{ x: -280 }}
+            transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+            className="w-[280px] bg-[#171717] text-white flex flex-col h-full shrink-0"
           >
-            <motion.div 
-              initial={{ scale: 0.92, y: 20 }}
-              animate={{ scale: 1, y: 0 }}
-              className="bg-white rounded-[2.5rem] p-10 max-w-xl w-full shadow-2xl text-center border border-slate-100"
-            >
-              <div className="w-16 h-16 bg-blue-600/10 text-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-6">
-                <Lock size={32} />
-              </div>
-              <h2 className="text-3xl font-black text-slate-900 mb-4">Complimentary Inquiries Completed</h2>
-              <p className="text-slate-600 mb-8 text-sm leading-relaxed">
-                You have reached your limit of free legal inquiries. Activate full access to continue researching statutes, analyzing precedents, and getting live drafting critiques.
-              </p>
-              <div className="grid grid-cols-2 gap-4 mb-8">
-                <div className="p-5 rounded-2xl bg-slate-50 border border-slate-200 text-left">
-                  <p className="text-[10px] font-bold text-blue-600 uppercase">Monthly Practice</p>
-                  <h4 className="text-2xl font-black text-slate-900">$29<span className="text-xs font-normal text-slate-400">/mo</span></h4>
-                </div>
-                <div className="p-5 rounded-2xl bg-slate-900 text-white text-left">
-                  <p className="text-[10px] font-bold text-blue-400 uppercase">Annual Firm License</p>
-                  <h4 className="text-2xl font-black">$249<span className="text-xs font-normal text-slate-400">/yr</span></h4>
-                </div>
-              </div>
-              <div className="flex flex-col gap-3">
-                <Link to="/contact" className="w-full py-4 bg-blue-600 text-white rounded-xl font-bold shadow-lg hover:bg-blue-500 transition-all">
-                  Activate Counsel License
-                </Link>
-                <button onClick={() => setShowPaywall(false)} className="text-xs text-slate-400 hover:text-slate-600">
-                  Continue Exploring
+            {/* New Chat Button */}
+            <div className="p-3">
+              <button
+                onClick={startNewChat}
+                className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-white/20 hover:bg-white/10 transition-colors text-sm font-medium"
+              >
+                <Plus size={18} />
+                New Conversation
+              </button>
+            </div>
+
+            {/* Conversation List */}
+            <div className="flex-grow overflow-y-auto px-2 pb-4 space-y-0.5">
+              {conversations.map((conv) => (
+                <button
+                  key={conv.id}
+                  onClick={() => loadConversation(conv.id)}
+                  className={cn(
+                    'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors group text-left',
+                    activeConvId === conv.id
+                      ? 'bg-white/15 text-white'
+                      : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'
+                  )}
+                >
+                  <MessageSquare size={14} className="shrink-0 opacity-60" />
+                  <span className="truncate flex-grow">{conv.title}</span>
+                  <Trash2
+                    size={13}
+                    className="shrink-0 opacity-0 group-hover:opacity-60 hover:!opacity-100 hover:text-rose-400 transition-opacity"
+                    onClick={(e) => deleteConversation(conv.id, e)}
+                  />
                 </button>
+              ))}
+
+              {conversations.length === 0 && (
+                <p className="text-xs text-slate-600 text-center mt-8 px-4">
+                  No conversations yet. Start a new legal inquiry.
+                </p>
+              )}
+            </div>
+
+            {/* Sidebar Footer */}
+            <div className="p-3 border-t border-white/10">
+              <div className="flex items-center gap-2 px-3 py-2 text-xs text-slate-500">
+                <Scale size={14} />
+                <span>LexAI Legal Intelligence</span>
               </div>
-            </motion.div>
-          </motion.div>
+            </div>
+          </motion.aside>
         )}
       </AnimatePresence>
 
-      {/* Top Legal Navigation Bar */}
-      <header className="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between sticky top-20 z-40">
-        <div className="flex items-center gap-6">
+      {/* ==================== MAIN CHAT AREA ==================== */}
+      <div className="flex-grow flex flex-col h-full min-w-0">
+        {/* Top Bar */}
+        <header className="flex items-center justify-between px-4 py-3 bg-white border-b border-slate-200 shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 bg-slate-900 rounded-lg flex items-center justify-center text-white">
-              <Scale size={18} />
-            </div>
-            <div>
-              <h1 className="font-bold text-sm text-slate-900 leading-none">LexAI Studio</h1>
-              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Professional Legal Intelligence</span>
-            </div>
-          </div>
-
-          <div className="hidden sm:flex bg-slate-100 p-1 rounded-full border border-slate-200">
             <button
-              onClick={() => setJurisdiction('nigeria')}
-              className={cn("px-3 py-1 rounded-full text-xs font-bold transition-all", jurisdiction === 'nigeria' ? "bg-white text-blue-900 shadow-xs" : "text-slate-500")}
+              onClick={() => setSidebarOpen(!sidebarOpen)}
+              className="p-2 rounded-lg hover:bg-slate-100 text-slate-600 transition-colors"
             >
-              🇳🇬 Nigerian Law
+              {sidebarOpen ? <X size={18} /> : <Menu size={18} />}
             </button>
-            <button
-              onClick={() => setJurisdiction('us')}
-              className={cn("px-3 py-1 rounded-full text-xs font-bold transition-all", jurisdiction === 'us' ? "bg-white text-blue-900 shadow-xs" : "text-slate-500")}
-            >
-              🇺🇸 US Law
-            </button>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200">
-            {[
-              { id: 'prep', label: 'IRAC Prep', icon: <BookOpen size={14} /> },
-              { id: 'training', label: 'Draft Critique', icon: <Brain size={14} /> },
-              { id: 'practice', label: 'Clause Drafting', icon: <Dumbbell size={14} /> },
-            ].map((s) => (
-              <button
-                key={s.id}
-                onClick={() => setMode(s.id as any)}
-                className={cn(
-                  "px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5",
-                  mode === s.id ? "bg-slate-900 text-white shadow-xs" : "text-slate-500 hover:text-slate-900"
-                )}
-              >
-                {s.icon} <span className="hidden md:inline">{s.label}</span>
-              </button>
-            ))}
-          </div>
-
-          <button 
-            onClick={() => setEditorOpen(!editorOpen)}
-            className={cn("p-2 rounded-xl border transition-colors", editorOpen ? "bg-blue-50 border-blue-200 text-blue-600" : "bg-white border-slate-200 text-slate-500")}
-            title="Toggle Drafting Canvas"
-          >
-            <SplitSquareVertical size={18} />
-          </button>
-        </div>
-      </header>
-
-      {/* Main Legal Workspace */}
-      <div className="flex-grow flex overflow-hidden h-[calc(100vh-135px)]">
-        {/* Left Side: TipTap Legal Drafting Canvas */}
-        {editorOpen && (
-          <div className="w-1/2 p-4 border-r border-slate-200 hidden lg:flex flex-col bg-white">
-            <div className="flex items-center justify-between pb-3 mb-2 border-b border-slate-100">
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Document Drafting Canvas</span>
-              <span className="text-[10px] bg-slate-100 px-2.5 py-1 rounded-full text-slate-600 font-medium">Ready for Counsel Review</span>
-            </div>
-            <div className="flex-grow overflow-hidden">
-              <TipTapEditor content={editorContent} onChange={setEditorContent} />
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 bg-slate-900 rounded-lg flex items-center justify-center">
+                <Scale size={14} className="text-white" />
+              </div>
+              <span className="font-bold text-sm text-slate-900">LexAI</span>
             </div>
           </div>
-        )}
 
-        {/* Right Side: AI Legal Counsel Chat */}
-        <div className={cn("flex flex-col h-full bg-slate-50", editorOpen ? "w-full lg:w-1/2" : "w-full max-w-4xl mx-auto")}>
-          <div className="flex-grow overflow-y-auto p-6 space-y-6">
-            {chatHistory.map((msg, idx) => (
-              <div key={idx} className={cn("flex flex-col", msg.role === 'ai' ? "items-start" : "items-end")}>
-                <div className={cn(
-                  "p-5 rounded-2xl max-w-[90%] text-sm leading-relaxed shadow-xs",
-                  msg.role === 'ai' ? "bg-white border border-slate-200/80 text-slate-800" : "bg-slate-900 text-white"
-                )}>
-                  {msg.role === 'ai' ? (
-                    <div className="prose prose-sm max-w-none prose-slate">
-                      <Markdown>{msg.content}</Markdown>
-                    </div>
-                  ) : (
-                    <p className="whitespace-pre-wrap">{msg.content}</p>
-                  )}
-                </div>
+          <div className="flex items-center gap-2">
+            {/* Jurisdiction Selector */}
+            <select
+              value={jurisdiction}
+              onChange={(e) => setJurisdiction(e.target.value as any)}
+              className="text-xs font-medium text-slate-700 bg-slate-100 border-0 rounded-lg px-3 py-1.5 outline-none cursor-pointer"
+            >
+              <option value="nigeria">🇳🇬 Nigerian Law</option>
+              <option value="us">🇺🇸 US Law</option>
+            </select>
 
-                {msg.suggestedResource && (
-                  <motion.div 
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="mt-3 max-w-[90%] bg-gradient-to-r from-amber-500/10 to-amber-50 border border-amber-300/40 p-4 rounded-2xl"
+            {/* Mode Selector */}
+            <select
+              value={mode}
+              onChange={(e) => setMode(e.target.value as any)}
+              className="text-xs font-medium text-slate-700 bg-slate-100 border-0 rounded-lg px-3 py-1.5 outline-none cursor-pointer"
+            >
+              <option value="prep">📖 IRAC Prep</option>
+              <option value="training">🧠 Draft Critique</option>
+              <option value="practice">⚖️ Clause Drafting</option>
+            </select>
+          </div>
+        </header>
+
+        {/* Messages Area */}
+        <div className="flex-grow overflow-y-auto">
+          {messages.length === 0 ? (
+            /* Empty State */
+            <div className="h-full flex flex-col items-center justify-center px-6 text-center">
+              <div className="w-16 h-16 bg-slate-900 rounded-2xl flex items-center justify-center mb-6">
+                <Scale size={28} className="text-white" />
+              </div>
+              <h2 className="text-2xl font-bold text-slate-900 mb-2">
+                How can I assist your legal research?
+              </h2>
+              <p className="text-slate-500 text-sm max-w-md mb-8">
+                Ask questions about {jurLabel}, request analysis using the {modeLabel} framework, or get feedback on your legal drafts.
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-lg w-full">
+                {[
+                  'What are the requirements for company incorporation under Nigerian law?',
+                  'Explain the IRAC framework for analyzing contract disputes.',
+                  'Draft a non-disclosure agreement clause for a tech startup.',
+                  'What are the key provisions of the Nigerian Data Protection Act?',
+                ].map((suggestion) => (
+                  <button
+                    key={suggestion}
+                    onClick={() => {
+                      setInput(suggestion);
+                      inputRef.current?.focus();
+                    }}
+                    className="text-left p-4 rounded-xl border border-slate-200 hover:bg-slate-50 text-sm text-slate-700 transition-colors"
                   >
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-[10px] font-bold text-amber-800 uppercase tracking-widest flex items-center gap-1.5">
-                        <ShoppingBag size={12} /> Practice Resource
-                      </span>
-                      <span className="font-bold text-xs text-amber-900">{msg.suggestedResource.price}</span>
+                    {suggestion}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            /* Messages */
+            <div className="max-w-3xl mx-auto px-4 py-6 space-y-6">
+              {messages.map((msg, idx) => (
+                <div
+                  key={idx}
+                  className={cn(
+                    'flex gap-4',
+                    msg.role === 'user' ? 'justify-end' : 'justify-start'
+                  )}
+                >
+                  {msg.role === 'assistant' && (
+                    <div className="w-8 h-8 bg-slate-900 rounded-full flex items-center justify-center shrink-0 mt-1">
+                      <Scale size={14} className="text-white" />
                     </div>
-                    <h5 className="font-bold text-slate-900 text-sm">{msg.suggestedResource.title}</h5>
-                    <p className="text-xs text-slate-600 mb-3">{msg.suggestedResource.desc}</p>
-                    <Link to={msg.suggestedResource.link} className="inline-flex items-center gap-2 bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold px-4 py-2 rounded-xl transition-all">
-                      Acquire Framework <ArrowRight size={12} />
-                    </Link>
-                  </motion.div>
-                )}
-              </div>
-            ))}
+                  )}
+                  <div
+                    className={cn(
+                      'max-w-[80%] rounded-2xl px-5 py-3.5 text-sm leading-relaxed',
+                      msg.role === 'user'
+                        ? 'bg-slate-900 text-white rounded-tr-sm'
+                        : 'bg-white border border-slate-200 text-slate-800 rounded-tl-sm shadow-xs'
+                    )}
+                  >
+                    {msg.role === 'assistant' ? (
+                      <div className="prose prose-sm max-w-none prose-slate prose-headings:font-bold prose-headings:text-slate-900">
+                        <Markdown>{msg.content}</Markdown>
+                      </div>
+                    ) : (
+                      <p className="whitespace-pre-wrap">{msg.content}</p>
+                    )}
+                  </div>
+                </div>
+              ))}
 
-            {isChatting && (
-              <div className="flex items-center gap-2.5 p-4 bg-white border border-slate-200 rounded-2xl w-fit">
-                <Loader2 size={16} className="animate-spin text-blue-600" />
-                <span className="text-xs text-slate-600 font-medium">Researching legal precedents and statutes...</span>
-              </div>
-            )}
-            <div ref={chatEndRef} />
-          </div>
+              {isLoading && (
+                <div className="flex gap-4">
+                  <div className="w-8 h-8 bg-slate-900 rounded-full flex items-center justify-center shrink-0 mt-1">
+                    <Scale size={14} className="text-white" />
+                  </div>
+                  <div className="bg-white border border-slate-200 rounded-2xl rounded-tl-sm px-5 py-4 shadow-xs">
+                    <div className="flex items-center gap-2">
+                      <Loader2 size={14} className="animate-spin text-slate-500" />
+                      <span className="text-sm text-slate-500">Researching legal sources...</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+              <div ref={chatEndRef} />
+            </div>
+          )}
+        </div>
 
-          {/* Inquiry Input Box */}
-          <div className="p-4 bg-white border-t border-slate-200">
-            <div className="relative">
+        {/* Input Bar */}
+        <div className="shrink-0 px-4 pb-4 pt-2 bg-[#f9fafb]">
+          <div className="max-w-3xl mx-auto">
+            <div className="relative bg-white border border-slate-300 rounded-2xl shadow-sm focus-within:border-slate-900 focus-within:shadow-md transition-all">
               <textarea
-                value={chatMessage}
-                onChange={(e) => setChatMessage(e.target.value)}
+                ref={inputRef}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
-                    handleChat();
+                    sendMessage();
                   }
                 }}
-                placeholder="Ask a legal inquiry or request advice on your draft..."
-                className="w-full pl-4 pr-12 py-3 bg-slate-100 border-0 rounded-2xl text-sm focus:ring-2 focus:ring-slate-900 outline-none resize-none h-14"
+                placeholder="Ask a legal question..."
+                rows={1}
+                className="w-full pl-5 pr-14 py-4 bg-transparent text-sm text-slate-900 placeholder:text-slate-400 outline-none resize-none max-h-32"
+                style={{ minHeight: '52px' }}
+                onInput={(e) => {
+                  const target = e.target as HTMLTextAreaElement;
+                  target.style.height = '52px';
+                  target.style.height = Math.min(target.scrollHeight, 128) + 'px';
+                }}
               />
               <button
-                type="button"
-                onClick={handleChat}
-                disabled={isChatting || !chatMessage.trim()}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 w-9 h-9 bg-slate-900 text-white rounded-xl flex items-center justify-center disabled:opacity-30 hover:bg-slate-800 transition-all"
+                onClick={sendMessage}
+                disabled={isLoading || !input.trim()}
+                className={cn(
+                  'absolute right-3 bottom-3 w-9 h-9 rounded-xl flex items-center justify-center transition-all',
+                  input.trim() && !isLoading
+                    ? 'bg-slate-900 text-white hover:bg-slate-800'
+                    : 'bg-slate-100 text-slate-400'
+                )}
               >
-                <Send size={15} />
+                {isLoading ? (
+                  <Loader2 size={16} className="animate-spin" />
+                ) : (
+                  <Send size={16} />
+                )}
               </button>
             </div>
-            <p className="text-[10px] text-center text-slate-400 mt-2">
-              LexAI provides legal intelligence assistance. Always confirm critical statutory citations with verified counsel.
+            <p className="text-[11px] text-center text-slate-400 mt-2">
+              LexAI provides legal intelligence assistance. Always verify critical citations with qualified counsel.
             </p>
           </div>
         </div>
