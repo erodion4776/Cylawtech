@@ -600,4 +600,198 @@ export default function AdminSaaS() {
                   <p className="text-xs text-slate-400 mt-1">Manage indexed statutory provisions and case precedents</p>
                 </div>
                 <button 
-                  onClick={() 
+                  onClick={() => {
+                    setUploadSuccess(null);
+                    setUploadError(null);
+                    setIngestPanelOpen(true);
+                  }}
+                  className="w-full sm:w-auto bg-blue-600 hover:bg-blue-500 text-white px-5 py-3.5 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-2 border-0 cursor-pointer active:scale-95 transition-all shadow-lg shadow-blue-600/15"
+                >
+                  <PlusCircle size={15} /> Teach LexAI New Knowledge
+                </button>
+              </div>
+
+              {/* Desktop Table */}
+              <div className="hidden sm:block bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-xl">
+                <table className="w-full text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-800 text-slate-500 text-xs uppercase font-bold tracking-wider">
+                      <th className="p-4">Jurisdiction</th>
+                      <th className="p-4">Context</th>
+                      <th className="p-4">Legal Excerpt</th>
+                      <th className="p-4 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/60">
+                    {docs.length === 0 ? (
+                      <tr><td colSpan={4} className="p-8 text-center text-slate-500">No legal documents indexed yet.</td></tr>
+                    ) : docs.map((doc) => (
+                      <tr key={doc.id} className="group hover:bg-slate-950/20 transition-colors">
+                        <td className="p-4 font-bold text-blue-400 uppercase text-xs">{doc.site || 'General'}</td>
+                        <td className="p-4 text-slate-500 text-xs font-semibold">{doc.context || 'general'}</td>
+                        <td className="p-4 text-slate-400 text-xs line-clamp-2 max-w-lg">{doc.content}</td>
+                        <td className="p-4 text-right align-middle">
+                          <button
+                            onClick={() => handleDeleteDocument(doc.id)}
+                            className="text-slate-600 hover:text-rose-400 p-2 transition-colors opacity-0 group-hover:opacity-100 bg-transparent border-0 cursor-pointer"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Mobile Cards */}
+              <div className="block sm:hidden space-y-3">
+                {docs.length === 0 ? (
+                  <div className="bg-slate-900 border border-slate-800 p-8 rounded-2xl text-center">
+                    <BookOpen size={28} className="mx-auto mb-3 text-slate-600" />
+                    <p className="text-xs text-slate-500">No legal documents indexed yet.</p>
+                  </div>
+                ) : docs.map((doc) => (
+                  <div key={doc.id} className="bg-slate-900 border border-slate-800 p-4 rounded-2xl space-y-2.5 relative shadow-md">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[10px] font-bold text-blue-400 uppercase tracking-wide bg-blue-500/10 px-2 py-0.5 rounded border border-blue-500/20 truncate">
+                        {doc.site || 'General'}
+                      </span>
+                      <span className="text-[10px] font-semibold text-slate-500 truncate">
+                        {doc.context || 'general'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-400 leading-relaxed line-clamp-4 pr-8">
+                      {doc.content}
+                    </p>
+                    <button
+                      onClick={() => handleDeleteDocument(doc.id)}
+                      className="absolute right-3 bottom-3 p-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 hover:text-rose-300 rounded-xl border-0 cursor-pointer transition-all"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </motion.div>
+          )}
+        </div>
+      </main>
+
+      {/* ==================== KNOWLEDGE INGESTION SLIDE-OVER ==================== */}
+      <AnimatePresence>
+        {ingestPanelOpen && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => { if (!isUploading) setIngestPanelOpen(false); }}
+              className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-xs"
+            />
+            <motion.div
+              initial={{ x: '100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '100%' }}
+              transition={{ type: 'spring', damping: 28, stiffness: 220 }}
+              className="fixed top-0 bottom-0 right-0 w-full sm:max-w-lg bg-slate-900 border-l border-slate-800 flex flex-col z-[110] shadow-2xl"
+            >
+              {/* Panel Header */}
+              <div className="flex items-center justify-between p-5 border-b border-slate-800 shrink-0">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <UploadCloud className="text-blue-500 shrink-0" size={20} />
+                  <h4 className="font-bold text-white text-base truncate">Teach LexAI</h4>
+                </div>
+                <button
+                  onClick={() => setIngestPanelOpen(false)}
+                  className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white bg-transparent border-0 cursor-pointer transition-colors shrink-0"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {/* Scrollable Form Body */}
+              <div className="flex-grow overflow-y-auto p-5 space-y-5">
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  Input statutes, precedents, or legal rules. The ingestion engine will automatically segment and register them for LexAI's intelligence memory.
+                </p>
+
+                <form onSubmit={handleIngestKnowledge} className="space-y-4">
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Jurisdiction Limit</label>
+                    <select
+                      value={knowledgeJur}
+                      onChange={(e) => setKnowledgeJurisdiction(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3.5 text-sm text-slate-200 focus:ring-2 focus:ring-blue-500 outline-none cursor-pointer"
+                    >
+                      <option value="nigeria">🇳🇬 Nigerian Law Library</option>
+                      <option value="us">🇺🇸 US Federal Law Library</option>
+                      <option value="global">🌐 General Legal Principles</option>
+                    </select>
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Legal Context Code</label>
+                    <input
+                      type="text"
+                      value={knowledgeContext}
+                      onChange={(e) => setKnowledgeContext(e.target.value)}
+                      placeholder="e.g. corporate-tax, contract-disputes"
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3.5 text-sm text-slate-200 focus:ring-2 focus:ring-blue-500 outline-none"
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Statutes / Legal Content</label>
+                    <textarea
+                      rows={10}
+                      value={knowledgeText}
+                      onChange={(e) => setKnowledgeText(e.target.value)}
+                      placeholder="Paste legislative clauses, direct citations, standard contract sections, or litigation reasoning..."
+                      className="w-full bg-slate-950 border border-slate-800 rounded-2xl px-4 py-3.5 text-sm text-slate-200 focus:ring-2 focus:ring-blue-500 outline-none resize-none leading-relaxed"
+                    />
+                  </div>
+
+                  {uploadSuccess && (
+                    <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-xl flex items-start gap-2 text-xs">
+                      <CheckCircle2 size={14} className="shrink-0 mt-0.5" />
+                      <span>{uploadSuccess}</span>
+                    </div>
+                  )}
+
+                  {uploadError && (
+                    <div className="p-3 bg-rose-500/10 border border-rose-500/20 text-rose-400 rounded-xl flex items-start gap-2 text-xs">
+                      <AlertCircle size={14} className="shrink-0 mt-0.5" />
+                      <span>{uploadError}</span>
+                    </div>
+                  )}
+                </form>
+              </div>
+
+              {/* Bottom Action Dock */}
+              <div className="p-5 border-t border-slate-800 flex gap-2 shrink-0 bg-slate-900">
+                <button
+                  onClick={() => setIngestPanelOpen(false)}
+                  className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold border-0 cursor-pointer transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleIngestKnowledge}
+                  disabled={isUploading || !knowledgeText.trim()}
+                  className="flex-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white font-bold py-3 rounded-xl text-xs flex items-center justify-center gap-2 border-0 cursor-pointer active:scale-97 transition-all shadow-lg"
+                >
+                  {isUploading ? (
+                    <><Loader2 size={14} className="animate-spin" /> Indexing...</>
+                  ) : (
+                    'Feed Knowledge'
+                  )}
+                </button>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
