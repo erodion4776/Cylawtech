@@ -20,8 +20,7 @@ import {
   PlusCircle,
   ChevronRight,
   ChevronLeft,
-  Zap,
-  RefreshCw
+  Zap
 } from 'lucide-react';
 
 interface SystemConfiguration {
@@ -62,7 +61,7 @@ export default function AdminSaaS() {
   const [loading, setLoading] = useState(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
-  // Layout & Interaction States
+  // Layout States
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [ingestPanelOpen, setIngestPanelOpen] = useState(false);
 
@@ -79,7 +78,7 @@ export default function AdminSaaS() {
     if (adminKey) validateAndFetch();
   }, [adminKey]);
 
-  // Poll statutory library progress on interval
+  // Periodic polling for background ingestion updates
   useEffect(() => {
     let interval: any;
     if (isAuth && activeTab === 'docs') {
@@ -160,13 +159,27 @@ export default function AdminSaaS() {
     setTimeout(() => setCopiedKey(null), 2000);
   };
 
-  const handleIngestKnowledge = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!docTitle.trim() || !knowledgeText.trim()) return;
+  // ROBUST KNOWLEDGE SUBMISSION HANDLER (Works with Touch & Click)
+  const handleIngestKnowledge = async (e?: React.FormEvent | React.MouseEvent) => {
+    if (e && typeof e.preventDefault === 'function') {
+      e.preventDefault();
+    }
+
+    setUploadError(null);
+    setUploadSuccess(null);
+
+    // Validation checks with clear user feedback
+    if (!docTitle.trim()) {
+      setUploadError('Please provide a document title (e.g. Companies & Allied Matters Act).');
+      return;
+    }
+
+    if (!knowledgeText.trim() || knowledgeText.trim().length < 10) {
+      setUploadError('Please enter the statutory text or legal excerpt (minimum 10 characters).');
+      return;
+    }
 
     setIsUploading(true);
-    setUploadSuccess(null);
-    setUploadError(null);
 
     try {
       const res = await fetch('/api/admin/documents', {
@@ -176,26 +189,29 @@ export default function AdminSaaS() {
           'x-admin-key': adminKey 
         },
         body: JSON.stringify({
-          title: docTitle,
+          title: docTitle.trim(),
           document_type: docType,
           jurisdiction: knowledgeJur,
-          content: knowledgeText
+          content: knowledgeText.trim()
         })
       });
 
       const data = await res.json();
 
       if (res.ok) {
-        setUploadSuccess(data.message || 'Knowledge registered successfully.');
+        setUploadSuccess(data.message || 'Legal knowledge registered! Background indexing started.');
         setDocTitle('');
         setKnowledgeText('');
-        fetchData();
-        setTimeout(() => setIngestPanelOpen(false), 2000);
+        fetchData(); // Refresh list immediately
+        setTimeout(() => {
+          setIngestPanelOpen(false);
+          setUploadSuccess(null);
+        }, 1500);
       } else {
-        setUploadError(data.error || 'Failed to submit knowledge.');
+        setUploadError(data.error || 'Failed to submit knowledge to LexAI.');
       }
-    } catch {
-      setUploadError('Connection error.');
+    } catch (err: any) {
+      setUploadError(`Connection error: ${err.message || 'Check your internet connection.'}`);
     } finally {
       setIsUploading(false);
     }
@@ -214,6 +230,7 @@ export default function AdminSaaS() {
     }
   };
 
+  // ======= AUTHENTICATION SCREEN =======
   if (!isAuth) {
     return (
       <div className="min-h-[100dvh] bg-slate-950 flex items-center justify-center p-4">
@@ -242,6 +259,7 @@ export default function AdminSaaS() {
     );
   }
 
+  // Available Admin Features
   const adminFeatures = [
     { 
       id: 'settings' as AdminTab,
@@ -276,13 +294,13 @@ export default function AdminSaaS() {
   return (
     <div className="min-h-[100dvh] bg-slate-950 text-slate-300 flex flex-col md:flex-row font-sans relative">
 
-      {/* ==================== MOBILE HEADER BAR ==================== */}
-      <header className="flex md:hidden items-center justify-between px-4 py-3 bg-slate-900/90 border-b border-slate-800 fixed top-0 inset-x-0 z-40 backdrop-blur-md h-14">
+      {/* ==================== STICKY MOBILE NAVIGATION BAR ==================== */}
+      <header className="flex md:hidden items-center justify-between px-4 py-3 bg-slate-900/95 border-b border-slate-800 fixed top-0 inset-x-0 z-40 backdrop-blur-md h-14">
         <div className="flex items-center gap-2 min-w-0">
           {activeTab !== 'home' ? (
             <button
               onClick={() => setActiveTab('home')}
-              className="p-1.5 -ml-1 rounded-lg hover:bg-slate-800 text-slate-300 bg-transparent border-0 cursor-pointer shrink-0"
+              className="p-1.5 -ml-1 rounded-lg hover:bg-slate-800 text-slate-300 bg-transparent border-0 cursor-pointer transition-colors shrink-0"
             >
               <ChevronLeft size={20} />
             </button>
@@ -306,12 +324,16 @@ export default function AdminSaaS() {
         {sidebarOpen && (
           <>
             <motion.div
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
               onClick={() => setSidebarOpen(false)}
               className="fixed inset-0 z-40 bg-black/60 backdrop-blur-xs md:hidden"
             />
             <motion.aside
-              initial={{ x: '-100%' }} animate={{ x: 0 }} exit={{ x: '-100%' }}
+              initial={{ x: '-100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '-100%' }}
               transition={{ type: 'spring', damping: 26, stiffness: 220 }}
               className="fixed top-0 bottom-0 left-0 w-72 bg-[#0c0d12] border-r border-slate-900 p-6 flex flex-col justify-between z-50 md:hidden shadow-2xl"
             >
@@ -321,7 +343,10 @@ export default function AdminSaaS() {
                     <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-black text-sm">LA</div>
                     <span className="font-bold text-white text-base">Counsel Admin</span>
                   </div>
-                  <button onClick={() => setSidebarOpen(false)} className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white bg-transparent border-0 cursor-pointer">
+                  <button 
+                    onClick={() => setSidebarOpen(false)}
+                    className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white bg-transparent border-0 cursor-pointer"
+                  >
                     <X size={18} />
                   </button>
                 </div>
@@ -365,7 +390,7 @@ export default function AdminSaaS() {
         )}
       </AnimatePresence>
 
-      {/* ==================== DESKTOP SIDEBAR ==================== */}
+      {/* ==================== DESKTOP PERMANENT SIDEBAR ==================== */}
       <aside className="hidden md:flex sticky top-0 h-screen w-64 bg-[#0c0d12] border-r border-slate-900 p-6 flex-col justify-between shrink-0">
         <div>
           <div className="flex items-center gap-2 mb-8">
@@ -409,25 +434,25 @@ export default function AdminSaaS() {
         </button>
       </aside>
 
-      {/* ==================== WORKSPACE WINDOW ==================== */}
+      {/* ==================== MAIN WORKSPACE ==================== */}
       <main className="flex-grow overflow-y-auto max-w-full pt-14 md:pt-0">
         <div className="p-4 sm:p-6 md:p-10">
 
-          {/* ==================== HUB VIEW ==================== */}
+          {/* ==================== DASHBOARD HUB (MOBILE HOME) ==================== */}
           {activeTab === 'home' && (
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="max-w-4xl mx-auto space-y-6">
               <div>
                 <h3 className="text-2xl sm:text-3xl font-black text-white tracking-tight">Practice Dashboard</h3>
-                <p className="text-xs sm:text-sm text-slate-400 mt-1.5">Manage access permissions and indexing statuses.</p>
+                <p className="text-xs sm:text-sm text-slate-400 mt-1.5">Manage access permissions, licenses, and library indexes.</p>
               </div>
 
-              {/* Live Status Header */}
+              {/* Status Card */}
               <div className={cn("p-5 rounded-3xl border flex items-center gap-4 shadow-xl", settings?.api_enabled ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-rose-500/5 border-rose-500/20')}>
                 <div className={cn("w-11 h-11 rounded-2xl flex items-center justify-center shrink-0", settings?.api_enabled ? 'bg-emerald-500/15' : 'bg-rose-500/15')}>
                   <Zap size={20} className={settings?.api_enabled ? 'text-emerald-400' : 'text-rose-400'} />
                 </div>
                 <div className="min-w-0 flex-grow">
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-sans">SaaS System Status</p>
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">SaaS System Status</p>
                   <p className={cn("text-base font-bold", settings?.api_enabled ? 'text-emerald-400' : 'text-rose-400')}>
                     {settings?.api_enabled ? 'Active and Processing Inquiries' : 'System Offline / Maintenance'}
                   </p>
@@ -437,7 +462,7 @@ export default function AdminSaaS() {
                 </button>
               </div>
 
-              {/* Menu Grid */}
+              {/* Feature Grid */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 {adminFeatures.map((feature) => (
                   <button
@@ -489,7 +514,7 @@ export default function AdminSaaS() {
                 </button>
               </div>
 
-              {/* Table */}
+              {/* Desktop Table */}
               <div className="hidden sm:block bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-xl">
                 <table className="w-full text-left text-sm">
                   <thead>
@@ -530,9 +555,14 @@ export default function AdminSaaS() {
                 </table>
               </div>
 
-              {/* Cards */}
+              {/* Mobile Cards */}
               <div className="block sm:hidden space-y-3">
-                {apiKeys.map((k) => (
+                {apiKeys.length === 0 ? (
+                  <div className="bg-slate-900 border border-slate-800 p-8 rounded-2xl text-center">
+                    <Key size={28} className="mx-auto mb-3 text-slate-600" />
+                    <p className="text-xs text-slate-500">No client licenses issued yet.</p>
+                  </div>
+                ) : apiKeys.map((k) => (
                   <div key={k.id} className="bg-slate-900 border border-slate-800 p-4 rounded-2xl space-y-3 shadow-md">
                     <div className="flex items-center justify-between">
                       <span className="font-bold text-white text-sm truncate pr-2">{k.site}</span>
@@ -566,14 +596,18 @@ export default function AdminSaaS() {
                   <p className="text-xs text-slate-400 mt-1">Manage and audit processed legal frameworks and precedents</p>
                 </div>
                 <button 
-                  onClick={() => { setUploadSuccess(null); setUploadError(null); setIngestPanelOpen(true); }}
-                  className="w-full sm:w-auto bg-blue-600 hover:bg-blue-500 text-white px-5 py-3.5 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-2 border-0 cursor-pointer active:scale-95 transition-all shadow-lg"
+                  onClick={() => { 
+                    setUploadSuccess(null); 
+                    setUploadError(null); 
+                    setIngestPanelOpen(true); 
+                  }}
+                  className="w-full sm:w-auto bg-blue-600 hover:bg-blue-500 text-white px-5 py-3.5 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-2 border-0 cursor-pointer active:scale-95 transition-all shadow-lg shadow-blue-600/15"
                 >
                   <PlusCircle size={15} /> Teach LexAI New Knowledge
                 </button>
               </div>
 
-              {/* Table */}
+              {/* Desktop Table */}
               <div className="hidden sm:block bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-xl">
                 <table className="w-full text-left text-sm">
                   <thead>
@@ -589,11 +623,11 @@ export default function AdminSaaS() {
                     {docs.length === 0 ? (
                       <tr><td colSpan={5} className="p-8 text-center text-slate-500">No documents registered.</td></tr>
                     ) : docs.map((doc) => (
-                      <tr key={doc.id} className="group hover:bg-slate-950/20 transition-colors">
+                      <tr key={doc.id} className="group hover:bg-slate-950/25 transition-colors">
                         <td className="p-4 font-bold text-blue-400 uppercase text-xs">
                           {doc.jurisdiction === 'nigeria' ? '🇳🇬 NIGERIA' : '🇺🇸 US LAW'}
                         </td>
-                        <td className="p-4 text-slate-500 text-xs font-semibold capitalize">{doc.document_type}</td>
+                        <td className="p-4 text-slate-400 text-xs font-semibold capitalize">{doc.document_type}</td>
                         <td className="p-4 text-slate-200 text-xs font-bold max-w-xs truncate">{doc.title}</td>
                         <td className="p-4 align-middle">
                           {doc.status === 'processing' ? (
@@ -620,7 +654,7 @@ export default function AdminSaaS() {
                 </table>
               </div>
 
-              {/* Cards */}
+              {/* Mobile Cards */}
               <div className="block sm:hidden space-y-3">
                 {docs.length === 0 ? (
                   <p className="text-xs text-slate-500 text-center py-6">No legal documents indexed.</p>
@@ -658,17 +692,21 @@ export default function AdminSaaS() {
         </div>
       </main>
 
-      {/* ==================== KNOWLEDGE INGESTION SLIDE-OVER ==================== */}
+      {/* ==================== KNOWLEDGE INGESTION SLIDE-OVER DRAWER ==================== */}
       <AnimatePresence>
         {ingestPanelOpen && (
           <>
             <motion.div
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              initial={{ opacity: 0 }} 
+              animate={{ opacity: 1 }} 
+              exit={{ opacity: 0 }}
               onClick={() => { if (!isUploading) setIngestPanelOpen(false); }}
               className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-xs"
             />
             <motion.div
-              initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
+              initial={{ x: '100%' }} 
+              animate={{ x: 0 }} 
+              exit={{ x: '100%' }}
               transition={{ type: 'spring', damping: 28, stiffness: 220 }}
               className="fixed top-0 bottom-0 right-0 w-full sm:max-w-lg bg-slate-900 border-l border-slate-800 flex flex-col z-[110] shadow-2xl"
             >
@@ -678,28 +716,39 @@ export default function AdminSaaS() {
                   <UploadCloud className="text-blue-500 shrink-0" size={20} />
                   <h4 className="font-bold text-white text-base truncate">Teach LexAI Knowledge</h4>
                 </div>
-                <button onClick={() => setIngestPanelOpen(false)} className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white bg-transparent border-0 cursor-pointer shrink-0">
+                <button 
+                  onClick={() => setIngestPanelOpen(false)} 
+                  disabled={isUploading}
+                  className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white bg-transparent border-0 cursor-pointer shrink-0 transition-colors"
+                >
                   <X size={18} />
                 </button>
               </div>
 
               {/* Scrollable Form Body */}
               <div className="flex-grow overflow-y-auto p-5 space-y-4">
-                <form onSubmit={handleIngestKnowledge} className="space-y-4">
+                <form 
+                  id="knowledge-ingest-form" 
+                  onSubmit={handleIngestKnowledge} 
+                  className="space-y-4"
+                >
                   <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Document Title</label>
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                      Document Title <span className="text-rose-500">*</span>
+                    </label>
                     <input
                       type="text"
+                      required
                       value={docTitle}
                       onChange={(e) => setDocTitle(e.target.value)}
-                      placeholder="e.g. 1999 Constitution of Nigeria (Amended)"
+                      placeholder="e.g. Companies and Allied Matters Act 2020"
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3.5 text-sm text-slate-200 focus:ring-2 focus:ring-blue-500 outline-none"
                     />
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
                     <div className="flex flex-col gap-1.5">
-                      <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Jurisdiction</label>
+                      <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Jurisdiction</label>
                       <select
                         value={knowledgeJur}
                         onChange={(e) => setKnowledgeJurisdiction(e.target.value)}
@@ -711,7 +760,7 @@ export default function AdminSaaS() {
                     </div>
 
                     <div className="flex flex-col gap-1.5">
-                      <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Document Type</label>
+                      <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Document Type</label>
                       <select
                         value={docType}
                         onChange={(e) => setDocType(e.target.value)}
@@ -727,9 +776,12 @@ export default function AdminSaaS() {
                   </div>
 
                   <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Knowledge Content</label>
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                      Knowledge Content <span className="text-rose-500">*</span>
+                    </label>
                     <textarea
                       rows={8}
+                      required
                       value={knowledgeText}
                       onChange={(e) => setKnowledgeText(e.target.value)}
                       placeholder="Paste legislative clauses, judgments, or standard contract sections here..."
@@ -739,37 +791,44 @@ export default function AdminSaaS() {
 
                   {uploadSuccess && (
                     <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-xl flex items-start gap-2 text-xs">
-                      <CheckCircle2 size={14} className="shrink-0 mt-0.5" />
+                      <CheckCircle2 size={16} className="shrink-0 mt-0.5" />
                       <span>{uploadSuccess}</span>
                     </div>
                   )}
 
                   {uploadError && (
                     <div className="p-3 bg-rose-500/10 border border-rose-500/20 text-rose-400 rounded-xl flex items-start gap-2 text-xs">
-                      <AlertCircle size={14} className="shrink-0 mt-0.5" />
+                      <AlertCircle size={16} className="shrink-0 mt-0.5" />
                       <span>{uploadError}</span>
                     </div>
                   )}
                 </form>
               </div>
 
-              {/* Bottom Actions */}
-              <div className="p-5 border-t border-slate-800 flex gap-2 shrink-0 bg-slate-900">
+              {/* Bottom Actions Dock */}
+              <div className="p-4 border-t border-slate-800 flex gap-3 shrink-0 bg-slate-900">
                 <button
+                  type="button"
                   onClick={() => setIngestPanelOpen(false)}
-                  className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold border-0 cursor-pointer"
+                  disabled={isUploading}
+                  className="flex-1 py-3.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold border-0 cursor-pointer transition-colors active:scale-95"
                 >
                   Cancel
                 </button>
                 <button
-                  onClick={handleIngestKnowledge}
-                  disabled={isUploading || !docTitle.trim() || !knowledgeText.trim()}
-                  className="flex-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white font-bold py-3 rounded-xl text-xs flex items-center justify-center gap-2 border-0 cursor-pointer active:scale-97 transition-all shadow-lg"
+                  type="submit"
+                  form="knowledge-ingest-form"
+                  onClick={(e) => handleIngestKnowledge(e)}
+                  disabled={isUploading}
+                  className="flex-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold py-3.5 rounded-xl text-xs flex items-center justify-center gap-2 border-0 cursor-pointer active:scale-95 transition-all shadow-lg shadow-blue-600/20"
                 >
                   {isUploading ? (
-                    <><Loader2 size={14} className="animate-spin" /> Submitting...</>
+                    <>
+                      <Loader2 size={16} className="animate-spin" />
+                      <span>Feeding AI...</span>
+                    </>
                   ) : (
-                    'Feed Knowledge'
+                    <span>Feed Knowledge</span>
                   )}
                 </button>
               </div>
