@@ -1,12 +1,22 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
+import { cn } from '../lib/utils';
 import { 
-  Settings, Key, FileText, Shield, Plus, Trash2, 
-  Power, Cpu, Lock, CheckCircle2, Copy, BookOpen
+  Settings as SettingsIcon, // Aliased to resolve namespace collision
+  Key, 
+  Shield, 
+  Plus, 
+  Trash2, 
+  Power, 
+  Lock, 
+  CheckCircle2, 
+  Copy, 
+  BookOpen 
 } from 'lucide-react';
 
-interface Settings {
+// Renamed interface to prevent any name collisions
+interface SystemConfiguration {
   id: string;
   api_enabled: boolean;
   active_model: string;
@@ -32,7 +42,7 @@ export default function AdminSaaS() {
   const [adminKey, setAdminKey] = useState<string>(localStorage.getItem('lex_admin_key') || '');
   const [isAuth, setIsAuth] = useState(false);
   const [activeTab, setActiveTab] = useState<'settings' | 'keys' | 'docs'>('settings');
-  const [settings, setSettings] = useState<Settings | null>(null);
+  const [settings, setSettings] = useState<SystemConfiguration | null>(null);
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
   const [docs, setDocs] = useState<Document[]>([]);
   const [loading, setLoading] = useState(false);
@@ -154,7 +164,7 @@ export default function AdminSaaS() {
 
           <nav className="space-y-1.5">
             {[
-              { id: 'settings', label: 'Practice Status', icon: Settings },
+              { id: 'settings', label: 'Practice Status', icon: SettingsIcon },
               { id: 'keys', label: 'Client Firm Keys', icon: Key },
               { id: 'docs', label: 'Statutory Library', icon: BookOpen },
             ].map((tab) => (
@@ -228,7 +238,7 @@ export default function AdminSaaS() {
                       <td className="p-4 font-bold text-white">{k.site}</td>
                       <td className="p-4 font-mono text-xs text-slate-400">
                         {k.key.substring(0, 10)}••••••••••
-                        <button onClick={() => handleCopyKey(k.key)} className="ml-2 text-slate-500 hover:text-white inline">
+                        <button onClick={() => handleCopyKey(k.key)} className="ml-2 text-slate-500 hover:text-white inline bg-transparent border-0 cursor-pointer">
                           {copiedKey === k.key ? <CheckCircle2 size={12} className="inline text-emerald-400" /> : <Copy size={12} className="inline" />}
                         </button>
                       </td>
@@ -239,7 +249,7 @@ export default function AdminSaaS() {
                       </td>
                       <td className="p-4 text-right">
                         {k.status === 'active' && (
-                          <button onClick={() => handleRevokeKey(k.id)} className="text-rose-400 hover:underline text-xs font-bold">
+                          <button onClick={() => handleRevokeKey(k.id)} className="text-rose-400 hover:underline text-xs font-bold bg-transparent border-0 cursor-pointer">
                             Revoke
                           </button>
                         )}
