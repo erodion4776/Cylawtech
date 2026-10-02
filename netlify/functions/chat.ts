@@ -10,6 +10,7 @@ const corsHeaders = {
 };
 
 serve(async (req) => {
+  // Handle CORS Preflight
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
@@ -87,7 +88,7 @@ serve(async (req) => {
       });
     }
 
-    // Manage conversation session
+    // Manage conversation session safely
     let convId = conversation_id;
     try {
       if (!convId) {
@@ -137,7 +138,7 @@ GUIDELINES:
 - Reference relevant statutory provisions, principles, and case law where applicable.
 - Answer clearly, directly, and concisely.`;
 
-    // ONLY active, supported production models on Groq
+    // Only active, verified production models on Groq
     const activeModels = [
       "llama-3.1-8b-instant",
       "gemma2-9b-it",
