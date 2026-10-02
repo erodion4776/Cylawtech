@@ -18,7 +18,7 @@ serve(async (req) => {
     const groqKey = Deno.env.get("GROQ_API_KEY");
     if (!groqKey) {
       return new Response(
-        JSON.stringify({ error: "Configuration Error: GROQ_API_KEY is not set in Supabase secrets." }),
+        JSON.stringify({ error: "Configuration Error: GROQ_API_KEY secret is not set in Supabase." }),
         { status: 500, headers: corsHeaders }
       );
     }
@@ -31,7 +31,7 @@ serve(async (req) => {
     const url = new URL(req.url);
     const action = url.searchParams.get("action") || "send";
 
-    // 1. Action: Get Conversations List
+    // 1. Fetch Conversations List
     if (action === "list") {
       try {
         const { data } = await supabase
@@ -45,7 +45,7 @@ serve(async (req) => {
       }
     }
 
-    // 2. Action: Get Conversation History
+    // 2. Fetch Conversation History
     if (action === "history") {
       try {
         const { conversation_id } = await req.json();
@@ -60,7 +60,7 @@ serve(async (req) => {
       }
     }
 
-    // 3. Action: Delete Conversation
+    // 3. Delete Conversation
     if (action === "delete") {
       try {
         const { conversation_id } = await req.json();
@@ -71,22 +71,23 @@ serve(async (req) => {
       }
     }
 
-    // 4. Action: Process Chat Message
+    // 4. Process User Legal Inquiry
+    const body = await req.json();
     const {
       message,
       conversation_id,
       jurisdiction = "Nigerian Law",
       mode = "prep",
-    } = await req.json();
+    } = body;
 
     if (!message || message.trim() === "") {
-      return new Response(JSON.stringify({ error: "Please enter a legal question." }), {
+      return new Response(JSON.stringify({ error: "Please enter a legal inquiry." }), {
         status: 400,
         headers: corsHeaders,
       });
     }
 
-    // Manage Conversation ID safely
+    // Manage conversation session
     let convId = conversation_id;
     try {
       if (!convId) {
@@ -99,7 +100,7 @@ serve(async (req) => {
         if (newConv) convId = newConv.id;
       }
     } catch (e) {
-      console.warn("Conversation log skipped:", e);
+      console.warn("Conversation DB record skipped:", e);
     }
 
     // Save user message to database
@@ -115,10 +116,10 @@ serve(async (req) => {
       console.warn("Message log skipped:", e);
     }
 
-    // Mode-specific legal directive
+    // Mode-specific legal directives
     let stageDirective = "Focus on structured IRAC legal analysis (Issue, Rule, Application, Conclusion).";
     if (mode === "training") {
-      stageDirective = "Act as senior legal counsel. Critique the draft and provide statutory recommendations.";
+      stageDirective = "Act as senior legal mentor. Critique reasoning and provide statutory recommendations.";
     } else if (mode === "practice") {
       stageDirective = "Draft precise legal clauses, contracts, or statutory advice.";
     }
@@ -136,47 +137,43 @@ GUIDELINES:
 - Reference relevant statutory provisions, principles, and case law where applicable.
 - Answer clearly, directly, and concisely.`;
 
-    // Dynamic model selection: Pick the best active model available on the user's Groq key
-    let selectedModel = "llama-3.1-8b-instant";
-    try {
-      const modelsList = await groq.models.list();
-      const activeModelIds = modelsList.data.map((m: any) => m.id);
+    // ONLY active, supported production models on Groq
+    const activeModels = [
+      "llama-3.1-8b-instant",
+      "gemma2-9b-it",
+      "llama-3.2-3b-preview",
+      "llama-3.2-1b-preview"
+    ];
 
-      const preferenceList = [
-        "llama-3.1-8b-instant",
-        "llama3-8b-8192",
-        "gemma2-9b-it",
-        "llama-3.2-3b-preview",
-        "llama-3.2-1b-preview",
-        "mixtral-8x7b-32768"
-      ];
+    let reply = "";
+    let lastError: any = null;
 
-      const foundModel = preferenceList.find((p) => activeModelIds.includes(p));
-      if (foundModel) {
-        selectedModel = foundModel;
-      } else {
-        const textModel = activeModelIds.find(
-          (id: string) => !id.includes("whisper") && !id.includes("guard")
-        );
-        if (textModel) selectedModel = textModel;
+    for (const modelName of activeModels) {
+      try {
+        const completion = await groq.chat.completions.create({
+          model: modelName,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: message },
+          ],
+          temperature: 0.2,
+          max_tokens: 1500,
+        });
+
+        reply = completion.choices[0]?.message?.content || "";
+        if (reply) {
+          console.log(`[AI SUCCESS] Response generated using: ${modelName}`);
+          break;
+        }
+      } catch (err: any) {
+        lastError = err;
+        console.warn(`[AI WARN] Model ${modelName} failed (${err.message}). Trying fallback...`);
       }
-      console.log(`[GROQ ENGINE] Auto-selected active model: ${selectedModel}`);
-    } catch (listErr) {
-      console.warn("[GROQ ENGINE] Model auto-discovery fallback to llama-3.1-8b-instant");
     }
 
-    // Fast Groq Inference
-    const completion = await groq.chat.completions.create({
-      model: selectedModel,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: message },
-      ],
-      temperature: 0.2,
-      max_tokens: 1500,
-    });
-
-    const reply = completion.choices[0]?.message?.content || "Unable to generate legal analysis at this time.";
+    if (!reply) {
+      throw lastError || new Error("All active Groq models failed.");
+    }
 
     // Save assistant reply to database
     try {
