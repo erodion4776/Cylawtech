@@ -9,136 +9,120 @@ const corsHeaders = {
   "Content-Type": "application/json",
 };
 
-const groq = new Groq({ apiKey: Deno.env.get("GROQ_API_KEY") || "" });
-const supabase = createClient(
-  Deno.env.get("SUPABASE_URL") || "",
-  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || ""
-);
-
-// Built-in Native Supabase Embedding Model (No external API key required)
-// @ts-ignore
-const model = new Supabase.ai.Session("gte-small");
-
-async function getNativeEmbedding(text: string): Promise<number[] | null> {
-  try {
-    const embedding = await model.run(text.substring(0, 1000), {
-      mean_pool: true,
-      normalize: true,
-    });
-    return Array.from(embedding);
-  } catch (err) {
-    console.error("Native embedding error:", err);
-    return null;
-  }
-}
-
-async function searchLegalDocs(message: string, jurisdiction: string): Promise<string> {
-  const embedding = await getNativeEmbedding(message);
-  if (!embedding) return "";
-
-  const context = jurisdiction.toLowerCase().includes("nigeria") ? "nigeria" : "general";
-  const { data: matches } = await supabase.rpc("match_site_documents", {
-    query_embedding: embedding,
-    match_threshold: 0.20,
-    match_count: 5,
-    p_site: "lexai",
-    p_context: context,
-  });
-
-  if (matches && matches.length > 0) {
-    return matches.map((m: any) => m.content).join("\n\n---\n\n");
-  }
-  return "";
-}
-
 serve(async (req) => {
+  // Handle CORS Preflight
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
 
   try {
+    const groqKey = Deno.env.get("GROQ_API_KEY");
+    if (!groqKey) {
+      return new Response(
+        JSON.stringify({ error: "Configuration Error: GROQ_API_KEY secret is not set in Supabase." }),
+        { status: 500, headers: corsHeaders }
+      );
+    }
+
+    const groq = new Groq({ apiKey: groqKey });
+    const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
+    const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+    const supabase = createClient(supabaseUrl, supabaseKey);
+
     const url = new URL(req.url);
     const action = url.searchParams.get("action") || "send";
 
     // 1. Fetch Conversations List
     if (action === "list") {
-      const { data } = await supabase
-        .from("conversations")
-        .select("id, title, jurisdiction, mode, updated_at")
-        .order("updated_at", { ascending: false })
-        .limit(50);
-
-      return new Response(JSON.stringify({ conversations: data || [] }), { headers: corsHeaders });
+      try {
+        const { data } = await supabase
+          .from("conversations")
+          .select("id, title, jurisdiction, mode, updated_at")
+          .order("updated_at", { ascending: false })
+          .limit(50);
+        return new Response(JSON.stringify({ conversations: data || [] }), { headers: corsHeaders });
+      } catch {
+        return new Response(JSON.stringify({ conversations: [] }), { headers: corsHeaders });
+      }
     }
 
-    // 2. Fetch Chat History
+    // 2. Fetch Conversation History
     if (action === "history") {
-      const { conversation_id } = await req.json();
-      const { data } = await supabase
-        .from("messages")
-        .select("id, role, content, created_at")
-        .eq("conversation_id", conversation_id)
-        .order("created_at", { ascending: true });
-
-      return new Response(JSON.stringify({ messages: data || [] }), { headers: corsHeaders });
+      try {
+        const { conversation_id } = await req.json();
+        const { data } = await supabase
+          .from("messages")
+          .select("id, role, content, created_at")
+          .eq("conversation_id", conversation_id)
+          .order("created_at", { ascending: true });
+        return new Response(JSON.stringify({ messages: data || [] }), { headers: corsHeaders });
+      } catch {
+        return new Response(JSON.stringify({ messages: [] }), { headers: corsHeaders });
+      }
     }
 
     // 3. Delete Conversation
     if (action === "delete") {
-      const { conversation_id } = await req.json();
-      await supabase.from("conversations").delete().eq("id", conversation_id);
-      return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
+      try {
+        const { conversation_id } = await req.json();
+        await supabase.from("conversations").delete().eq("id", conversation_id);
+        return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
+      } catch {
+        return new Response(JSON.stringify({ success: false }), { headers: corsHeaders });
+      }
     }
 
-    // 4. Send Message & Groq Generation
+    // 4. Process User Legal Inquiry
+    const body = await req.json();
     const {
       message,
       conversation_id,
       jurisdiction = "Nigerian Law",
       mode = "prep",
-    } = await req.json();
+    } = body;
 
-    if (!message) {
+    if (!message || message.trim() === "") {
       return new Response(JSON.stringify({ error: "Please enter a legal inquiry." }), {
         status: 400,
         headers: corsHeaders,
       });
     }
 
-    // Create / Update Conversation
+    // Manage conversation session
     let convId = conversation_id;
-    if (!convId) {
-      const title = message.length > 35 ? message.substring(0, 35) + "..." : message;
-      const { data: newConv } = await supabase
-        .from("conversations")
-        .insert({ title, jurisdiction, mode })
-        .select()
-        .single();
-      convId = newConv?.id;
-    } else {
-      await supabase
-        .from("conversations")
-        .update({ updated_at: new Date().toISOString(), jurisdiction, mode })
-        .eq("id", convId);
+    try {
+      if (!convId) {
+        const title = message.length > 35 ? message.substring(0, 35) + "..." : message;
+        const { data: newConv } = await supabase
+          .from("conversations")
+          .insert({ title, jurisdiction, mode })
+          .select()
+          .single();
+        if (newConv) convId = newConv.id;
+      }
+    } catch (e) {
+      console.warn("Conversation DB record skipped:", e);
     }
 
-    // Save user message
-    await supabase.from("messages").insert({
-      conversation_id: convId,
-      role: "user",
-      content: message,
-    });
+    // Save user message to database
+    try {
+      if (convId) {
+        await supabase.from("messages").insert({
+          conversation_id: convId,
+          role: "user",
+          content: message,
+        });
+      }
+    } catch (e) {
+      console.warn("Message log skipped:", e);
+    }
 
-    // Native Search
-    const legalContext = await searchLegalDocs(message, jurisdiction);
-
-    let stageDirective = "";
-    if (mode === "prep") {
-      stageDirective = "Focus on structured IRAC legal analysis (Issue, Rule, Application, Conclusion). Spot key legal issues.";
-    } else if (mode === "training") {
-      stageDirective = "Act as senior counsel. Critique the user's draft, point out statutory weaknesses, and offer suggestions.";
+    // Mode-specific legal directives
+    let stageDirective = "Focus on structured IRAC legal analysis (Issue, Rule, Application, Conclusion).";
+    if (mode === "training") {
+      stageDirective = "Act as senior legal mentor. Critique reasoning and provide statutory recommendations.";
     } else if (mode === "practice") {
-      stageDirective = "Draft precise legal clauses or contract sections using formal jurisdiction-specific language.";
+      stageDirective = "Draft precise legal clauses, contracts, or statutory advice.";
     }
 
     const systemPrompt = `You are LexAI, a high-level legal intelligence counsel.
@@ -148,34 +132,63 @@ JURISDICTION: ${jurisdiction}
 PRIMARY OBJECTIVE:
 ${stageDirective}
 
-KNOWLEDGE BASE:
-${legalContext || "Rely on standard statutory frameworks and legal principles applicable to this jurisdiction."}
-
 GUIDELINES:
-- Provide structured, formal, and authoritative responses.
+- Provide structured, formal, and authoritative legal analysis.
 - Use numbered points and bold headings.
-- Reference applicable statutes, rules, and precedents.
-- Do not mention technical system processes or embedding functions.`;
+- Reference relevant statutory provisions, principles, and case law where applicable.
+- Answer clearly, directly, and concisely.`;
 
-    // Fast Groq Inference
-    const completion = await groq.chat.completions.create({
-      model: "llama-3.3-70b-versatile",
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: message },
-      ],
-      temperature: 0.2,
-      max_tokens: 1500,
-    });
+    // Active production models on Groq
+    const modelCandidates = [
+      "llama-3.1-8b-instant",
+      "llama3-8b-8192",
+      "gemma2-9b-it",
+      "mixtral-8x7b-32768"
+    ];
 
-    const reply = completion.choices[0]?.message?.content || "Unable to complete legal analysis at this time.";
+    let reply = "";
+    let lastError: any = null;
 
-    // Save assistant message
-    await supabase.from("messages").insert({
-      conversation_id: convId,
-      role: "assistant",
-      content: reply,
-    });
+    // Try candidates in order
+    for (const modelName of modelCandidates) {
+      try {
+        const completion = await groq.chat.completions.create({
+          model: modelName,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: message },
+          ],
+          temperature: 0.2,
+          max_tokens: 1500,
+        });
+
+        reply = completion.choices[0]?.message?.content || "";
+        if (reply) {
+          console.log(`[AI SUCCESS] Response generated using: ${modelName}`);
+          break;
+        }
+      } catch (err: any) {
+        lastError = err;
+        console.warn(`[AI WARN] Model ${modelName} failed (${err.message}). Trying fallback candidate...`);
+      }
+    }
+
+    if (!reply) {
+      throw lastError || new Error("All Groq model candidates failed.");
+    }
+
+    // Save assistant reply to database
+    try {
+      if (convId) {
+        await supabase.from("messages").insert({
+          conversation_id: convId,
+          role: "assistant",
+          content: reply,
+        });
+      }
+    } catch (e) {
+      console.warn("Assistant response log skipped:", e);
+    }
 
     return new Response(
       JSON.stringify({
@@ -186,9 +199,9 @@ GUIDELINES:
     );
   } catch (error: any) {
     console.error("Chat Error:", error);
-    return new Response(JSON.stringify({ error: "An unexpected error occurred. Please try again." }), {
-      status: 500,
-      headers: corsHeaders,
-    });
+    return new Response(
+      JSON.stringify({ error: `AI Engine Error: ${error.message || "Failed to process inquiry"}` }),
+      { status: 500, headers: corsHeaders }
+    );
   }
 });
