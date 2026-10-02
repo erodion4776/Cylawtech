@@ -80,13 +80,13 @@ serve(async (req) => {
     } = await req.json();
 
     if (!message || message.trim() === "") {
-      return new Response(JSON.stringify({ error: "Please provide a legal inquiry." }), {
+      return new Response(JSON.stringify({ error: "Please enter a legal question." }), {
         status: 400,
         headers: corsHeaders,
       });
     }
 
-    // Manage Conversation ID
+    // Manage Conversation ID safely
     let convId = conversation_id;
     try {
       if (!convId) {
@@ -99,7 +99,7 @@ serve(async (req) => {
         if (newConv) convId = newConv.id;
       }
     } catch (e) {
-      console.warn("Conversation logging skipped:", e);
+      console.warn("Conversation log skipped:", e);
     }
 
     // Save user message to database
@@ -136,45 +136,47 @@ GUIDELINES:
 - Reference relevant statutory provisions, principles, and case law where applicable.
 - Answer clearly, directly, and concisely.`;
 
-    // Active production models from your Groq dashboard
-    const modelCandidates = [
-      "llama-3.1-8b-instant",     // Meta Llama 3.1 8B (560 t/sec)
-      "openai/gpt-oss-120b",      // OpenAI GPT-OSS 120B (500 t/sec)
-      "openai/gpt-oss-20b",       // OpenAI GPT-OSS 20B (1000 t/sec)
-      "qwen/qwen3.8-27b",         // Qwen 3.8 27B (450 t/sec)
-      "llama-3.3-70b-versatile"   // Enterprise fallback
-    ];
+    // Dynamic model selection: Pick the best active model available on the user's Groq key
+    let selectedModel = "llama-3.1-8b-instant";
+    try {
+      const modelsList = await groq.models.list();
+      const activeModelIds = modelsList.data.map((m: any) => m.id);
 
-    let reply = "";
-    let lastError: any = null;
+      const preferenceList = [
+        "llama-3.1-8b-instant",
+        "llama3-8b-8192",
+        "gemma2-9b-it",
+        "llama-3.2-3b-preview",
+        "llama-3.2-1b-preview",
+        "mixtral-8x7b-32768"
+      ];
 
-    // Try candidates in order
-    for (const modelName of modelCandidates) {
-      try {
-        const completion = await groq.chat.completions.create({
-          model: modelName,
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: message },
-          ],
-          temperature: 0.2,
-          max_tokens: 1500,
-        });
-
-        reply = completion.choices[0]?.message?.content || "";
-        if (reply) {
-          console.log(`[AI SUCCESS] Generated response using model: ${modelName}`);
-          break;
-        }
-      } catch (err: any) {
-        lastError = err;
-        console.warn(`[AI WARN] Model ${modelName} failed (${err.message}). Trying next model...`);
+      const foundModel = preferenceList.find((p) => activeModelIds.includes(p));
+      if (foundModel) {
+        selectedModel = foundModel;
+      } else {
+        const textModel = activeModelIds.find(
+          (id: string) => !id.includes("whisper") && !id.includes("guard")
+        );
+        if (textModel) selectedModel = textModel;
       }
+      console.log(`[GROQ ENGINE] Auto-selected active model: ${selectedModel}`);
+    } catch (listErr) {
+      console.warn("[GROQ ENGINE] Model auto-discovery fallback to llama-3.1-8b-instant");
     }
 
-    if (!reply) {
-      throw lastError || new Error("All Groq production models failed.");
-    }
+    // Fast Groq Inference
+    const completion = await groq.chat.completions.create({
+      model: selectedModel,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: message },
+      ],
+      temperature: 0.2,
+      max_tokens: 1500,
+    });
+
+    const reply = completion.choices[0]?.message?.content || "Unable to generate legal analysis at this time.";
 
     // Save assistant reply to database
     try {
