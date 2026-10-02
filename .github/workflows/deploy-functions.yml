@@ -5,7 +5,7 @@ on:
     branches:
       - main
       - master
-  workflow_dispatch: # Lets you click "Run workflow" manually from GitHub
+  workflow_dispatch:
 
 jobs:
   deploy:
@@ -15,13 +15,14 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Install Supabase CLI
+      - name: Setup Supabase CLI
         uses: supabase/setup-cli@v1
         with:
-          version: latest
+          version: 1.207.9 # Pinned stable version prevents rate-limit errors
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Deploy Chat Function
+      - name: Deploy Chat Edge Function
         run: |
-          supabase functions deploy chat --project-ref utevbbyriqhnxhoipljv --no-verify-jwt
+          supabase functions deploy chat --project-ref ${{ secrets.SUPABASE_PROJECT_ID }} --no-verify-jwt
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
