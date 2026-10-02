@@ -10,7 +10,6 @@ const corsHeaders = {
 };
 
 serve(async (req) => {
-  // Handle CORS Preflight
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
@@ -32,7 +31,7 @@ serve(async (req) => {
     const url = new URL(req.url);
     const action = url.searchParams.get("action") || "send";
 
-    // 1. Fetch Conversations List
+    // 1. Action: Get Conversations List
     if (action === "list") {
       try {
         const { data } = await supabase
@@ -46,7 +45,7 @@ serve(async (req) => {
       }
     }
 
-    // 2. Fetch Conversation History
+    // 2. Action: Get Conversation History
     if (action === "history") {
       try {
         const { conversation_id } = await req.json();
@@ -61,7 +60,7 @@ serve(async (req) => {
       }
     }
 
-    // 3. Delete Conversation
+    // 3. Action: Delete Conversation
     if (action === "delete") {
       try {
         const { conversation_id } = await req.json();
@@ -117,6 +116,26 @@ serve(async (req) => {
       console.warn("Message log skipped:", e);
     }
 
+    // Search Knowledge Library using Postgres Full-Text Search
+    let contextDocuments = "";
+    try {
+      const siteFilter = jurisdiction.toLowerCase().includes("nigeria") ? "nigeria" : "us";
+      const { data: matches } = await supabase.rpc("search_legal_documents", {
+        query_text: message,
+        p_site: siteFilter,
+        p_context: "general",
+        match_limit: 4,
+      });
+
+      if (matches && matches.length > 0) {
+        contextDocuments = matches
+          .map((m: any) => `[STATUTE/CASE: ${m.title}]\n${m.content}`)
+          .join("\n\n---\n\n");
+      }
+    } catch (searchErr) {
+      console.warn("Knowledge search fallback:", searchErr);
+    }
+
     // Mode-specific legal directives
     let stageDirective = "Focus on structured IRAC legal analysis (Issue, Rule, Application, Conclusion).";
     if (mode === "training") {
@@ -132,49 +151,26 @@ JURISDICTION: ${jurisdiction}
 PRIMARY OBJECTIVE:
 ${stageDirective}
 
+KNOWLEDGE BASE & STATUTORY CONTEXT:
+${contextDocuments || "Use your knowledge of standard statutory frameworks and legal principles for this jurisdiction."}
+
 GUIDELINES:
 - Provide structured, formal, and authoritative legal analysis.
 - Use numbered points and bold headings.
 - Reference relevant statutory provisions, principles, and case law where applicable.
 - Answer clearly, directly, and concisely.`;
 
-    // Only active, verified production models on Groq
-    const activeModels = [
-      "llama-3.1-8b-instant",
-      "gemma2-9b-it",
-      "llama-3.2-3b-preview",
-      "llama-3.2-1b-preview"
-    ];
+    const completion = await groq.chat.completions.create({
+      model: "llama-3.1-8b-instant",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: message },
+      ],
+      temperature: 0.2,
+      max_tokens: 1500,
+    });
 
-    let reply = "";
-    let lastError: any = null;
-
-    for (const modelName of activeModels) {
-      try {
-        const completion = await groq.chat.completions.create({
-          model: modelName,
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: message },
-          ],
-          temperature: 0.2,
-          max_tokens: 1500,
-        });
-
-        reply = completion.choices[0]?.message?.content || "";
-        if (reply) {
-          console.log(`[AI SUCCESS] Response generated using: ${modelName}`);
-          break;
-        }
-      } catch (err: any) {
-        lastError = err;
-        console.warn(`[AI WARN] Model ${modelName} failed (${err.message}). Trying fallback...`);
-      }
-    }
-
-    if (!reply) {
-      throw lastError || new Error("All active Groq models failed.");
-    }
+    const reply = completion.choices[0]?.message?.content || "Unable to generate legal analysis at this time.";
 
     // Save assistant reply to database
     try {
