@@ -46,7 +46,7 @@ const LexAI: React.FC = () => {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [showJurisdictionPicker, setShowJurisdictionPicker] = useState(false);
 
-  // Copy Feedback and Editing States
+  // Copy Feedback
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
 
   // Daily usage tracking
@@ -166,7 +166,6 @@ const LexAI: React.FC = () => {
     setInput(text);
     if (inputRef.current) {
       inputRef.current.focus();
-      // Auto-adjust height to fit the text loaded
       inputRef.current.style.height = '48px';
       inputRef.current.style.height = Math.min(inputRef.current.scrollHeight, 112) + 'px';
     }
@@ -176,7 +175,7 @@ const LexAI: React.FC = () => {
   const jurLabel = jurisdiction === 'nigeria' ? '🇳🇬 Nigerian Law' : '🇺🇸 US Law';
 
   return (
-    <div className="fixed inset-0 h-[100dvh] w-full flex flex-col overflow-hidden bg-white dark:bg-[#171717] font-sans">
+    <div className="h-full w-full flex flex-col overflow-hidden bg-white dark:bg-[#171717] font-sans">
 
       {/* ==================== PAYWALL MODAL ==================== */}
       <AnimatePresence>
@@ -244,6 +243,7 @@ const LexAI: React.FC = () => {
                 </button>
               </div>
 
+              {/* Drawer inner scrollable history */}
               <div className="flex-1 overflow-y-auto px-2 py-3 space-y-0.5 overscroll-contain">
                 {conversations.length === 0 ? (
                   <p className="text-xs text-slate-600 text-center mt-10 px-4">No conversations yet.</p>
@@ -282,6 +282,7 @@ const LexAI: React.FC = () => {
                 </div>
               </div>
 
+              {/* Drawer Links */}
               <nav className="p-3 border-t border-white/10 bg-[#0f0f0f] space-y-0.5">
                 {[
                   { to: '/', label: 'Home Page', icon: Home },
@@ -305,7 +306,7 @@ const LexAI: React.FC = () => {
         )}
       </AnimatePresence>
 
-      {/* ==================== HEADER ==================== */}
+      {/* ==================== TOP HEADER ==================== */}
       <header className="shrink-0 h-14 flex items-center justify-between px-3 bg-white dark:bg-[#171717] border-b border-slate-200 dark:border-white/5 z-30 pt-[env(safe-area-inset-top)]">
         <button
           onClick={() => setDrawerOpen(true)}
@@ -377,8 +378,8 @@ const LexAI: React.FC = () => {
         <div className="fixed inset-0 z-30" onClick={() => setShowJurisdictionPicker(false)} />
       )}
 
-      {/* ==================== MESSAGES & CHAT VIEW ==================== */}
-      <div className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain px-4 py-4">
+      {/* ==================== CHAT STREAM (ISOLATED SCROLL CONTAINER) ==================== */}
+      <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 py-4">
         {messages.length === 0 ? (
           /* Landing Page State */
           <div className="min-h-full flex flex-col items-center justify-center text-center max-w-lg mx-auto py-6">
@@ -415,7 +416,7 @@ const LexAI: React.FC = () => {
             </div>
           </div>
         ) : (
-          /* Conversation Thread */
+          /* Conversation Messages */
           <div className="max-w-3xl mx-auto space-y-6 pb-4">
             {messages.map((msg, idx) => {
               const isUser = msg.role === 'user';
@@ -438,7 +439,6 @@ const LexAI: React.FC = () => {
                       {isUser ? (
                         <p className="whitespace-pre-wrap leading-relaxed break-words">{msg.content}</p>
                       ) : (
-                        /* Bulletproof Markdown Renderer with custom Table/Element wraps */
                         <div className="prose prose-sm max-w-none prose-slate dark:prose-invert leading-relaxed break-words overflow-x-auto w-full">
                           <Markdown
                             components={{
@@ -468,7 +468,7 @@ const LexAI: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Interactive Option Toolbar (Edit and Copy) */}
+                  {/* Actions Toolbar */}
                   <div className={cn('flex items-center gap-3 px-1.5 py-0.5 text-slate-400 dark:text-slate-500', isUser ? 'justify-end' : 'pl-10 justify-start')}>
                     <button
                       onClick={() => handleCopy(msg.content, idx)}
@@ -524,7 +524,7 @@ const LexAI: React.FC = () => {
         )}
       </div>
 
-      {/* ==================== BOTTOM INPUT BAR ==================== */}
+      {/* ==================== PINNED INPUT DOCK ==================== */}
       <div className="shrink-0 px-3 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-white dark:bg-[#171717] border-t border-slate-200/50 dark:border-white/5 z-30">
         <div className="max-w-3xl mx-auto">
           <div className="relative bg-slate-100 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl focus-within:border-slate-400 dark:focus-within:border-white/20 focus-within:bg-white dark:focus-within:bg-white/10 transition-all">
@@ -563,8 +563,7 @@ const LexAI: React.FC = () => {
             </button>
           </div>
 
-          {/* Legal Disclaimer */}
-          <div className="flex flex-col sm:flex-row justify-between items-center px-1 mt-2 text-[10px] text-slate-400 dark:text-slate-500 gap-1 text-center sm:text-left leading-tight">
+          <div className="flex flex-col sm:flex-row justify-between items-center px-1 mt-1.5 text-[10px] text-slate-400 dark:text-slate-500 gap-1 text-center sm:text-left leading-tight">
             <span>{messagesRemaining} free inquiries left today.</span>
             <span>Lex AI provides legal information, not legal representation. Verify important legal advice and citations with a qualified lawyer.</span>
           </div>
