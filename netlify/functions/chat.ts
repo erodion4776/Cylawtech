@@ -18,7 +18,7 @@ serve(async (req) => {
     const groqKey = Deno.env.get("GROQ_API_KEY");
     if (!groqKey) {
       return new Response(
-        JSON.stringify({ error: "Configuration Error: GROQ_API_KEY secret is not set in Supabase." }),
+        JSON.stringify({ error: "Configuration Error: GROQ_API_KEY not set in Supabase secrets." }),
         { status: 500, headers: corsHeaders }
       );
     }
@@ -31,7 +31,7 @@ serve(async (req) => {
     const url = new URL(req.url);
     const action = url.searchParams.get("action") || "send";
 
-    // 1. Action: Get Conversations List
+    // 1. Fetch Conversations List
     if (action === "list") {
       try {
         const { data } = await supabase
@@ -45,7 +45,7 @@ serve(async (req) => {
       }
     }
 
-    // 2. Action: Get Conversation History
+    // 2. Fetch Conversation History
     if (action === "history") {
       try {
         const { conversation_id } = await req.json();
@@ -60,7 +60,7 @@ serve(async (req) => {
       }
     }
 
-    // 3. Action: Delete Conversation
+    // 3. Delete Conversation
     if (action === "delete") {
       try {
         const { conversation_id } = await req.json();
@@ -87,8 +87,10 @@ serve(async (req) => {
       });
     }
 
-    // Manage conversation session safely
+    // Manage conversation session
     let convId = conversation_id;
+    let priorMessages: any[] = [];
+
     try {
       if (!convId) {
         const title = message.length > 35 ? message.substring(0, 35) + "..." : message;
@@ -98,12 +100,21 @@ serve(async (req) => {
           .select()
           .single();
         if (newConv) convId = newConv.id;
+      } else {
+        // Load prior messages for conversation memory & follow-up intelligence
+        const { data: prevMessages } = await supabase
+          .from("messages")
+          .select("role, content")
+          .eq("conversation_id", convId)
+          .order("created_at", { ascending: true })
+          .limit(20);
+        priorMessages = prevMessages || [];
       }
     } catch (e) {
       console.warn("Conversation DB record skipped:", e);
     }
 
-    // Save user message to database
+    // Save user message
     try {
       if (convId) {
         await supabase.from("messages").insert({
@@ -116,63 +127,125 @@ serve(async (req) => {
       console.warn("Message log skipped:", e);
     }
 
-    // Search Knowledge Library using Postgres Full-Text Search
-    let contextDocuments = "";
+    // Search Statutory Knowledge Base (optional, for RAG)
+    let legalContext = "";
     try {
-      const siteFilter = jurisdiction.toLowerCase().includes("nigeria") ? "nigeria" : "us";
-      const { data: matches } = await supabase.rpc("search_legal_documents", {
+      const { data: matches } = await supabase.rpc("search_statutory_library", {
         query_text: message,
-        p_site: siteFilter,
-        p_context: "general",
-        match_limit: 4,
+        p_jurisdiction: jurisdiction.toLowerCase().includes("nigeria") ? "nigeria" : "us",
+        match_limit: 3,
       });
 
       if (matches && matches.length > 0) {
-        contextDocuments = matches
-          .map((m: any) => `[STATUTE/CASE: ${m.title}]\n${m.content}`)
+        legalContext = matches
+          .map((m: any) => `[${m.document_title}] ${m.content}`)
           .join("\n\n---\n\n");
       }
     } catch (searchErr) {
-      console.warn("Knowledge search fallback:", searchErr);
+      console.warn("Knowledge library search skipped:", searchErr);
     }
 
-    // Mode-specific legal directives
-    let stageDirective = "Focus on structured IRAC legal analysis (Issue, Rule, Application, Conclusion).";
-    if (mode === "training") {
-      stageDirective = "Act as senior legal mentor. Critique reasoning and provide statutory recommendations.";
-    } else if (mode === "practice") {
-      stageDirective = "Draft precise legal clauses, contracts, or statutory advice.";
-    }
+    // CORE SYSTEM PROMPT: Interactive Legal Consultant Mode
+    const systemPrompt = `You are Lex AI, a professional and empathetic Nigerian legal counsel acting as an interactive consultant.
 
-    const systemPrompt = `You are LexAI, a high-level legal intelligence counsel.
+JURISDICTION FOCUS: ${jurisdiction}
 
-JURISDICTION: ${jurisdiction}
+YOUR PRIMARY ROLE:
+You behave like a senior lawyer during a client intake interview. Your goal is to understand the client's legal situation DEEPLY before providing any opinion.
 
-PRIMARY OBJECTIVE:
-${stageDirective}
+INTERACTIVE CONSULTATION PROTOCOL:
 
-KNOWLEDGE BASE & STATUTORY CONTEXT:
-${contextDocuments || "Use your knowledge of standard statutory frameworks and legal principles for this jurisdiction."}
+STEP 1 — ASSESS WHAT YOU KNOW:
+- Analyze the current conversation. Have you gathered enough facts to identify:
+  (a) Who the parties involved are?
+  (b) What exact event or dispute occurred?
+  (c) The relevant dates and timeline?
+  (d) Any documents, agreements, or communications involved?
+  (e) The client's goal (seeking damages, enforcement, defense, prevention, etc.)?
 
-GUIDELINES:
-- Provide structured, formal, and authoritative legal analysis.
-- Use numbered points and bold headings.
-- Reference relevant statutory provisions, principles, and case law where applicable.
-- Answer clearly, directly, and concisely.`;
+STEP 2 — IF FACTS ARE INCOMPLETE (GATHER MORE INFORMATION):
+- Ask ONE or TWO focused, friendly follow-up questions.
+- Be conversational and warm, not interrogative.
+- Explain briefly why the information is needed (e.g., "To determine if the contract is enforceable, I'll need to know…").
+- Do NOT provide a formal legal opinion yet.
+- Keep responses concise (3-5 sentences max during fact-gathering).
 
-    const completion = await groq.chat.completions.create({
-      model: "llama-3.1-8b-instant",
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: message },
-      ],
-      temperature: 0.2,
-      max_tokens: 1500,
+STEP 3 — WHEN YOU HAVE ENOUGH FACTS (DELIVER FULL ANALYSIS):
+Transition into providing a complete legal analysis using the IRAC framework:
+
+**ISSUE:** Clearly state the legal question(s) at hand.
+
+**RULE:** Cite applicable statutes, case law, or legal principles (${jurisdiction}).
+
+**ANALYSIS:** Apply the rule to the client's specific facts step by step.
+
+**CONCLUSION:** Provide a clear professional opinion and recommended next steps.
+
+STEP 4 — ALWAYS RECOMMEND PROFESSIONAL REVIEW:
+End every full analysis with:
+"⚖️ This analysis is based on the facts you shared. For formal representation or filing in court, please consult a licensed Nigerian lawyer."
+
+STYLE GUIDELINES:
+- Warm, professional, and clear — like a trusted lawyer, not a textbook.
+- Use markdown bold headings for structure.
+- Never fabricate laws. If uncertain, say so transparently.
+- Reference the client's own words throughout to show you understand.
+
+${legalContext ? `\nRELEVANT LEGAL REFERENCE DOCUMENTS AVAILABLE:\n${legalContext}` : ""}
+
+Begin the consultation now based on the conversation history.`;
+
+    // Build message history (OpenAI chat format)
+    const chatMessages: any[] = [
+      { role: "system", content: systemPrompt }
+    ];
+
+    // Add prior conversation turns
+    priorMessages.forEach((m) => {
+      chatMessages.push({
+        role: m.role === "assistant" ? "assistant" : "user",
+        content: m.content
+      });
     });
 
-    const reply = completion.choices[0]?.message?.content || "Unable to generate legal analysis at this time.";
+    // Add current user message
+    chatMessages.push({ role: "user", content: message });
 
-    // Save assistant reply to database
+    // Only active, verified Groq production models
+    const activeModels = [
+      "llama-3.1-8b-instant",
+      "gemma2-9b-it",
+      "llama-3.2-3b-preview"
+    ];
+
+    let reply = "";
+    let lastError: any = null;
+
+    for (const modelName of activeModels) {
+      try {
+        const completion = await groq.chat.completions.create({
+          model: modelName,
+          messages: chatMessages,
+          temperature: 0.3,
+          max_tokens: 2000,
+        });
+
+        reply = completion.choices[0]?.message?.content || "";
+        if (reply) {
+          console.log(`[Lex AI SUCCESS] Response via: ${modelName}`);
+          break;
+        }
+      } catch (err: any) {
+        lastError = err;
+        console.warn(`Model ${modelName} failed (${err.message}). Trying next...`);
+      }
+    }
+
+    if (!reply) {
+      throw lastError || new Error("All active legal reasoning models failed.");
+    }
+
+    // Save Lex AI's reply
     try {
       if (convId) {
         await supabase.from("messages").insert({
@@ -182,7 +255,7 @@ GUIDELINES:
         });
       }
     } catch (e) {
-      console.warn("Assistant response log skipped:", e);
+      console.warn("Assistant reply log skipped:", e);
     }
 
     return new Response(
@@ -193,9 +266,9 @@ GUIDELINES:
       { headers: corsHeaders }
     );
   } catch (error: any) {
-    console.error("Chat Error:", error);
+    console.error("Lex AI Consultation Error:", error);
     return new Response(
-      JSON.stringify({ error: `AI Engine Error: ${error.message || "Failed to process inquiry"}` }),
+      JSON.stringify({ error: `Legal Consultant Error: ${error.message || "Unable to continue consultation."}` }),
       { status: 500, headers: corsHeaders }
     );
   }
