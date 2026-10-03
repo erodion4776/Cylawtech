@@ -11,8 +11,9 @@ import Legal from './pages/Legal';
 import LexAI from './pages/LexAI';
 import LexAIStandalone from './pages/LexAIStandalone';
 import AdminSaaS from './pages/AdminSaaS';
+import HowItWorks from './pages/HowItWorks'; // <-- IMPORT HERE
 import PageTransition from './components/PageTransition';
-import CookieConsent from './components/CookieConsent'; // <-- IMPORT HERE
+import CookieConsent from './components/CookieConsent';
 
 const ScrollToTop = () => {
   const { pathname } = useLocation();
@@ -31,6 +32,7 @@ const AnimatedRoutes = () => {
           <Route path="/" element={<PageTransition><Home /></PageTransition>} />
           <Route path="/about" element={<PageTransition><About /></PageTransition>} />
           <Route path="/contact" element={<PageTransition><Contact /></PageTransition>} />
+          <Route path="/how-it-works" element={<PageTransition><HowItWorks /></PageTransition>} /> {/* <-- NEW ROUTE */}
           <Route path="/saas-admin" element={<PageTransition><AdminSaaS /></PageTransition>} />
           <Route path="/:type" element={<PageTransition><Legal /></PageTransition>} />
         </Routes>
@@ -44,7 +46,7 @@ export default function App() {
     <Router>
       <ScrollToTop />
       <AppContent />
-      <CookieConsent /> {/* <-- MOUNT HERE */}
+      <CookieConsent />
     </Router>
   );
 }
