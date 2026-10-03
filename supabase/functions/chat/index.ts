@@ -2,9 +2,11 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.8";
 import Groq from "https://esm.sh/groq-sdk@0.5.0";
 
+const DAILY_LIMIT = 10;
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-user-id",
   "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
   "Content-Type": "application/json",
 };
@@ -18,7 +20,7 @@ serve(async (req) => {
     const groqKey = Deno.env.get("GROQ_API_KEY");
     if (!groqKey) {
       return new Response(
-        JSON.stringify({ error: "Configuration Error: GROQ_API_KEY secret is not set in Supabase." }),
+        JSON.stringify({ error: "Configuration Error: GROQ_API_KEY is missing." }),
         { status: 500, headers: corsHeaders }
       );
     }
@@ -30,55 +32,79 @@ serve(async (req) => {
 
     const url = new URL(req.url);
     const action = url.searchParams.get("action") || "send";
+    const headerUserId = req.headers.get("x-user-id");
 
-    // 1. Action: Get conversations list
+    // ==========================================
+    // ACTION: Get Conversations (Scoped to user_id)
+    // ==========================================
     if (action === "list") {
-      try {
-        const { data } = await supabase
-          .from("conversations")
-          .select("id, title, jurisdiction, mode, updated_at")
-          .order("updated_at", { ascending: false })
-          .limit(50);
-        return new Response(JSON.stringify({ conversations: data || [] }), { headers: corsHeaders });
-      } catch {
-        return new Response(JSON.stringify({ conversations: [] }), { headers: corsHeaders });
-      }
+      const targetUser = url.searchParams.get("user_id") || headerUserId || "public_user";
+      const { data } = await supabase
+        .from("conversations")
+        .select("id, title, jurisdiction, mode, updated_at")
+        .eq("user_id", targetUser)
+        .order("updated_at", { ascending: false })
+        .limit(50);
+
+      // Also fetch today's database usage count
+      const today = new Date().toISOString().split("T")[0];
+      const { data: usageData } = await supabase
+        .from("user_daily_usage")
+        .select("count")
+        .eq("user_id", targetUser)
+        .eq("usage_date", today)
+        .maybeSingle();
+
+      const currentCount = usageData?.count || 0;
+
+      return new Response(
+        JSON.stringify({ 
+          conversations: data || [],
+          usage: {
+            count: currentCount,
+            limit: DAILY_LIMIT,
+            remaining: Math.max(0, DAILY_LIMIT - currentCount)
+          }
+        }), 
+        { headers: corsHeaders }
+      );
     }
 
-    // 2. Action: Get conversation history
+    // ==========================================
+    // ACTION: Get Conversation History
+    // ==========================================
     if (action === "history") {
-      try {
-        const { conversation_id } = await req.json();
-        const { data } = await supabase
-          .from("messages")
-          .select("id, role, content, created_at")
-          .eq("conversation_id", conversation_id)
-          .order("created_at", { ascending: true });
-        return new Response(JSON.stringify({ messages: data || [] }), { headers: corsHeaders });
-      } catch {
-        return new Response(JSON.stringify({ messages: [] }), { headers: corsHeaders });
-      }
+      const { conversation_id } = await req.json();
+      const { data } = await supabase
+        .from("messages")
+        .select("id, role, content, created_at")
+        .eq("conversation_id", conversation_id)
+        .order("created_at", { ascending: true });
+      return new Response(JSON.stringify({ messages: data || [] }), { headers: corsHeaders });
     }
 
-    // 3. Action: Delete conversation
+    // ==========================================
+    // ACTION: Delete Conversation
+    // ==========================================
     if (action === "delete") {
-      try {
-        const { conversation_id } = await req.json();
-        await supabase.from("conversations").delete().eq("id", conversation_id);
-        return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
-      } catch {
-        return new Response(JSON.stringify({ success: false }), { headers: corsHeaders });
-      }
+      const { conversation_id } = await req.json();
+      await supabase.from("conversations").delete().eq("id", conversation_id);
+      return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
     }
 
-    // 4. Process Chat Message
+    // ==========================================
+    // ACTION: Send Message & Record In Database
+    // ==========================================
     const body = await req.json();
     const {
       message,
-      messages = [], // Full chat history from frontend
+      messages = [],
       conversation_id,
       jurisdiction = "Nigerian Law",
+      user_id = "public_user",
     } = body;
+
+    const activeUserId = user_id || headerUserId || "public_user";
 
     if (!message || message.trim() === "") {
       return new Response(JSON.stringify({ error: "Please enter a legal inquiry." }), {
@@ -87,36 +113,63 @@ serve(async (req) => {
       });
     }
 
-    // Manage conversation in database
+    // 1. Check & Enforce Database Daily Rate Limit
+    const today = new Date().toISOString().split("T")[0];
+    const { data: currentUsage } = await supabase
+      .from("user_daily_usage")
+      .select("count")
+      .eq("user_id", activeUserId)
+      .eq("usage_date", today)
+      .maybeSingle();
+
+    const usedSoFar = currentUsage?.count || 0;
+
+    if (usedSoFar >= DAILY_LIMIT) {
+      return new Response(
+        JSON.stringify({ 
+          error: "Daily Inquiry Limit Reached. Please upgrade or try again tomorrow.",
+          paywall: true,
+          usage: { count: usedSoFar, limit: DAILY_LIMIT, remaining: 0 }
+        }),
+        { status: 429, headers: corsHeaders }
+      );
+    }
+
+    // 2. Increment Usage Count in Database
+    await supabase.from("user_daily_usage").upsert({
+      user_id: activeUserId,
+      usage_date: today,
+      count: usedSoFar + 1,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "user_id, usage_date" });
+
+    // 3. Create or Update Conversation Session in Database
     let convId = conversation_id;
-    try {
-      if (!convId) {
-        const title = message.length > 35 ? message.substring(0, 35) + "..." : message;
-        const { data: newConv } = await supabase
-          .from("conversations")
-          .insert({ title, jurisdiction })
-          .select()
-          .single();
-        if (newConv) convId = newConv.id;
-      }
-    } catch (e) {
-      console.warn("DB conversation creation skipped:", e);
+    if (!convId) {
+      const title = message.length > 35 ? message.substring(0, 35) + "..." : message;
+      const { data: newConv } = await supabase
+        .from("conversations")
+        .insert({ title, jurisdiction, user_id: activeUserId })
+        .select()
+        .single();
+      if (newConv) convId = newConv.id;
+    } else {
+      await supabase
+        .from("conversations")
+        .update({ updated_at: new Date().toISOString(), jurisdiction })
+        .eq("id", convId);
     }
 
-    // Save user message to database
-    try {
-      if (convId) {
-        await supabase.from("messages").insert({
-          conversation_id: convId,
-          role: "user",
-          content: message,
-        });
-      }
-    } catch (e) {
-      console.warn("User message log skipped:", e);
+    // 4. Save User Message in Database
+    if (convId) {
+      await supabase.from("messages").insert({
+        conversation_id: convId,
+        role: "user",
+        content: message,
+      });
     }
 
-    // Search knowledge library (RAG)
+    // 5. Search Statutory Knowledge Base (RAG)
     let legalContext = "";
     try {
       const { data: matches } = await supabase.rpc("search_statutory_library", {
@@ -129,8 +182,8 @@ serve(async (req) => {
       }
     } catch { /* silent */ }
 
-    // STRICT MULTI-STAGE LEGAL INTAKE SYSTEM PROMPT
-    const systemPrompt = `You are Lex AI, a seasoned Nigerian legal practitioner acting as an interactive client-consultant.
+    // System Prompt for Interactive Intake
+    const systemPrompt = `You are Lex AI, a seasoned Nigerian & US legal practitioner acting as an interactive client-consultant.
 
 JURISDICTION: ${jurisdiction}
 
@@ -139,27 +192,24 @@ You are conducting a strict, sequential client intake interview. You are FORBIDD
 
 THE INTAKE RULES (MANDATORY):
 1. ALWAYS ASK FOLLOW-UP QUESTIONS: Every single response you make MUST contain 1 to 2 targeted follow-up questions to gather necessary context.
-2. DO NOT ANSWER YET: Even if you think you have enough facts to solve the problem, do not provide a final legal conclusion or full structured analysis. Instead, explain what legal issue you are investigating and ask a clarifying question about it.
-3. CONVERSATIONAL PACE: Ask only 1 or 2 questions at a time. Never overwhelm the user with a list of questions.
-4. GATHER THE FOLLOWING CONTEXT (One by one over multiple turns):
-   - What exact corporate or legal structure is involved (e.g., limited liability company under CAMA, registered business name, unregistered partnership, or private individuals)?
-   - When did the events occur (specific timeline, dates, or frequency)?
-   - Are there written contracts, deeds, receipts, emails, or WhatsApp communications that prove the dispute?
+2. DO NOT ANSWER YET: Explain what legal issue you are investigating and ask a clarifying question about it.
+3. CONVERSATIONAL PACE: Ask only 1 or 2 questions at a time.
+4. GATHER THE FOLLOWING CONTEXT:
+   - What exact corporate or legal structure is involved?
+   - When did the events occur (dates/timeline)?
+   - Are there written contracts, deeds, receipts, emails, or WhatsApp communications?
    - What specific outcome, remedy, or protection is the user trying to achieve?
 
-EXCEPTIONS (WHEN YOU ARE ALLOWED TO GIVE A FULL ANALYSIS):
+EXCEPTIONS (FULL ANALYSIS):
 Only provide your final structured analysis (with Issues, Applicable Laws, Analysis, and Next Steps) if:
 - The user explicitly requests: "Give me the final analysis" OR "Provide your final opinion now."
-- OR you have successfully conducted a thorough back-and-forth interview of at least 3 to 4 turns and have collected all necessary facts.
-
-Otherwise, your ONLY job is to acknowledge what they said, explain why more context is needed under ${jurisdiction}, and ask your follow-up questions.
+- OR you have conducted at least 3 to 4 turns of follow-up questions and collected all necessary facts.
 
 ***
-⚖️ *Lex AI provides legal information, not legal representation. Verify important legal advice and citations with a qualified lawyer before taking formal action.*
+⚖️ *Lex AI provides legal information, not legal representation. Verify important legal advice and citations with a qualified lawyer.*
 
 ${legalContext ? `\nRELEVANT STATUTORY REFERENCES:\n${legalContext}` : ""}`;
 
-    // Construct full conversation history
     const chatMessages: any[] = [{ role: "system", content: systemPrompt }];
 
     if (Array.isArray(messages) && messages.length > 0) {
@@ -175,11 +225,11 @@ ${legalContext ? `\nRELEVANT STATUTORY REFERENCES:\n${legalContext}` : ""}`;
       chatMessages.push({ role: "user", content: message });
     }
 
-    // ONLY active, verified production models on Groq
+    // Active Groq Production Models
     const activeModels = [
-      "llama-3.1-8b-instant",  // Active Production (560 t/sec) - Primary
-      "openai/gpt-oss-20b",     // Active Production (1000 t/sec) - Fallback 1
-      "openai/gpt-oss-120b"     // Active Production (500 t/sec) - Fallback 2
+      "llama-3.1-8b-instant",
+      "openai/gpt-oss-20b",
+      "openai/gpt-oss-120b"
     ];
 
     let reply = "";
@@ -190,42 +240,41 @@ ${legalContext ? `\nRELEVANT STATUTORY REFERENCES:\n${legalContext}` : ""}`;
         const completion = await groq.chat.completions.create({
           model: modelName,
           messages: chatMessages,
-          temperature: 0.1, // Low temperature forces strict intake protocol
+          temperature: 0.1,
           max_tokens: 1500,
         });
 
         reply = completion.choices[0]?.message?.content || "";
-        if (reply) {
-          console.log(`[Lex AI SUCCESS] Generated response with: ${modelName}`);
-          break;
-        }
+        if (reply) break;
       } catch (err: any) {
         lastError = err;
-        console.warn(`[Lex AI WARN] Model ${modelName} failed (${err.message}). Trying fallback...`);
       }
     }
 
     if (!reply) {
-      throw lastError || new Error("All active Groq models failed.");
+      throw lastError || new Error("All AI inference models failed.");
     }
 
-    // Save assistant reply to DB
-    try {
-      if (convId) {
-        await supabase.from("messages").insert({
-          conversation_id: convId,
-          role: "assistant",
-          content: reply,
-        });
-      }
-    } catch (e) {
-      console.warn("Assistant DB insert skipped:", e);
+    // 6. Save Assistant Reply to Database
+    if (convId) {
+      await supabase.from("messages").insert({
+        conversation_id: convId,
+        role: "assistant",
+        content: reply,
+      });
     }
+
+    const updatedRemaining = Math.max(0, DAILY_LIMIT - (usedSoFar + 1));
 
     return new Response(
       JSON.stringify({
         response: reply,
         conversation_id: convId,
+        usage: {
+          count: usedSoFar + 1,
+          limit: DAILY_LIMIT,
+          remaining: updatedRemaining,
+        }
       }),
       { headers: corsHeaders }
     );
