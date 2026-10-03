@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   Plus, Send, Loader2, MessageSquare, Trash2,
   Scale, Menu, X, Home, Info, Mail, ShieldAlert,
-  Lock, Sparkles, ChevronDown
+  Lock, Sparkles, ChevronDown, Copy, Check, Pencil
 } from 'lucide-react';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import { cn } from '../lib/utils';
@@ -42,8 +42,12 @@ const LexAI: React.FC = () => {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [jurisdiction, setJurisdiction] = useState<'nigeria' | 'us'>('nigeria');
+  const [mode, setMode] = useState<'prep' | 'training' | 'practice'>('prep');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [showJurisdictionPicker, setShowJurisdictionPicker] = useState(false);
+
+  // Copy Feedback and Editing States
+  const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
 
   // Daily usage tracking
   const [dailyUsage, setDailyUsage] = useState<DailyUsage>(() => {
@@ -121,7 +125,6 @@ const LexAI: React.FC = () => {
     setInput('');
     if (inputRef.current) inputRef.current.style.height = '48px';
 
-    // Build current conversation history including the new user message
     const updatedMessages: Message[] = [...messages, { role: 'user', content: textToSend }];
     setMessages(updatedMessages);
     setIsLoading(true);
@@ -133,7 +136,7 @@ const LexAI: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: textToSend,
-          messages: updatedMessages, // Sends full conversation memory
+          messages: updatedMessages,
           conversation_id: activeConvId,
           jurisdiction: jurisdiction === 'nigeria' ? 'Nigerian Law' : 'US Federal Law',
         }),
@@ -153,13 +156,29 @@ const LexAI: React.FC = () => {
     }
   };
 
+  const handleCopy = (text: string, idx: number) => {
+    navigator.clipboard.writeText(text);
+    setCopiedIdx(idx);
+    setTimeout(() => setCopiedIdx(null), 2000);
+  };
+
+  const handleEdit = (text: string) => {
+    setInput(text);
+    if (inputRef.current) {
+      inputRef.current.focus();
+      // Auto-adjust height to fit the text loaded
+      inputRef.current.style.height = '48px';
+      inputRef.current.style.height = Math.min(inputRef.current.scrollHeight, 112) + 'px';
+    }
+  };
+
   const messagesRemaining = Math.max(0, DAILY_LIMIT - (dailyUsage.date === new Date().toISOString().split('T')[0] ? dailyUsage.count : 0));
   const jurLabel = jurisdiction === 'nigeria' ? '🇳🇬 Nigerian Law' : '🇺🇸 US Law';
 
   return (
-    <div className="fixed inset-0 h-[100dvh] w-full flex flex-col overflow-hidden bg-white dark:bg-[#171717] font-sans select-none">
+    <div className="fixed inset-0 h-[100dvh] w-full flex flex-col overflow-hidden bg-white dark:bg-[#171717] font-sans">
 
-      {/* PAYWALL MODAL */}
+      {/* ==================== PAYWALL MODAL ==================== */}
       <AnimatePresence>
         {showPaywall && (
           <motion.div
@@ -202,7 +221,7 @@ const LexAI: React.FC = () => {
         )}
       </AnimatePresence>
 
-      {/* SLIDE-OUT DRAWER */}
+      {/* ==================== SLIDE-OUT DRAWER ==================== */}
       <AnimatePresence>
         {drawerOpen && (
           <>
@@ -286,7 +305,7 @@ const LexAI: React.FC = () => {
         )}
       </AnimatePresence>
 
-      {/* HEADER */}
+      {/* ==================== HEADER ==================== */}
       <header className="shrink-0 h-14 flex items-center justify-between px-3 bg-white dark:bg-[#171717] border-b border-slate-200 dark:border-white/5 z-30 pt-[env(safe-area-inset-top)]">
         <button
           onClick={() => setDrawerOpen(true)}
@@ -314,7 +333,7 @@ const LexAI: React.FC = () => {
         </button>
       </header>
 
-      {/* JURISDICTION PICKER */}
+      {/* Jurisdiction Picker */}
       <AnimatePresence>
         {showJurisdictionPicker && (
           <motion.div
@@ -358,10 +377,10 @@ const LexAI: React.FC = () => {
         <div className="fixed inset-0 z-30" onClick={() => setShowJurisdictionPicker(false)} />
       )}
 
-      {/* MESSAGES & LANDING VIEW */}
+      {/* ==================== MESSAGES & CHAT VIEW ==================== */}
       <div className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain px-4 py-4">
         {messages.length === 0 ? (
-          /* Landing Screen */
+          /* Landing Page State */
           <div className="min-h-full flex flex-col items-center justify-center text-center max-w-lg mx-auto py-6">
             <div className="w-14 h-14 bg-slate-900 dark:bg-white/10 rounded-2xl flex items-center justify-center mb-4 shadow-sm">
               <Scale size={26} className="text-white dark:text-[#B4975A]" />
@@ -396,39 +415,93 @@ const LexAI: React.FC = () => {
             </div>
           </div>
         ) : (
-          /* Live Chat Stream */
-          <div className="max-w-3xl mx-auto space-y-5 pb-4">
-            {messages.map((msg, idx) => (
-              <motion.div
-                key={idx}
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.3, ease: 'easeOut' }}
-                className={cn('flex gap-3', msg.role === 'user' ? 'justify-end' : 'justify-start')}
-              >
-                {msg.role === 'assistant' && (
-                  <div className="w-7 h-7 bg-slate-900 dark:bg-white/10 rounded-full flex items-center justify-center shrink-0 mt-1">
-                    <Scale size={12} className="text-white dark:text-[#B4975A]" />
-                  </div>
-                )}
-                <div
-                  className={cn(
-                    'max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed',
-                    msg.role === 'user'
-                      ? 'bg-slate-900 dark:bg-blue-600 text-white rounded-tr-md'
-                      : 'bg-slate-100 dark:bg-white/5 text-slate-800 dark:text-slate-200 border border-slate-200/50 dark:border-white/5 rounded-tl-md'
-                  )}
-                >
-                  {msg.role === 'assistant' ? (
-                    <div className="prose prose-sm max-w-none prose-slate dark:prose-invert prose-headings:font-bold leading-relaxed">
-                      <Markdown>{msg.content}</Markdown>
+          /* Conversation Thread */
+          <div className="max-w-3xl mx-auto space-y-6 pb-4">
+            {messages.map((msg, idx) => {
+              const isUser = msg.role === 'user';
+              return (
+                <div key={idx} className="space-y-1 group">
+                  <div className={cn('flex gap-3', isUser ? 'justify-end' : 'justify-start')}>
+                    {!isUser && (
+                      <div className="w-7 h-7 bg-slate-900 dark:bg-white/10 rounded-full flex items-center justify-center shrink-0 mt-1">
+                        <Scale size={12} className="text-white dark:text-[#B4975A]" />
+                      </div>
+                    )}
+                    <div
+                      className={cn(
+                        'max-w-[85%] rounded-2xl px-5 py-3.5 text-sm leading-relaxed select-text flex flex-col',
+                        isUser
+                          ? 'bg-slate-900 dark:bg-blue-600 text-white rounded-tr-md'
+                          : 'bg-slate-100 dark:bg-white/5 text-slate-800 dark:text-slate-200 border border-slate-200/50 dark:border-white/5 rounded-tl-md shadow-xs'
+                      )}
+                    >
+                      {isUser ? (
+                        <p className="whitespace-pre-wrap leading-relaxed break-words">{msg.content}</p>
+                      ) : (
+                        /* Bulletproof Markdown Renderer with custom Table/Element wraps */
+                        <div className="prose prose-sm max-w-none prose-slate dark:prose-invert leading-relaxed break-words overflow-x-auto w-full">
+                          <Markdown
+                            components={{
+                              table: ({node, ...props}) => (
+                                <div className="overflow-x-auto w-full my-4 rounded-xl border border-slate-200 dark:border-white/10 shadow-xs">
+                                  <table className="min-w-full divide-y divide-slate-200 dark:divide-white/10 text-xs text-left" {...props} />
+                                </div>
+                              ),
+                              th: ({node, ...props}) => (
+                                <th className="px-4 py-2 bg-slate-50 dark:bg-white/5 font-bold text-slate-700 dark:text-slate-300 border-b border-slate-200 dark:border-white/10" {...props} />
+                              ),
+                              td: ({node, ...props}) => (
+                                <td className="px-4 py-2 border-t border-slate-100 dark:border-white/5 text-slate-600 dark:text-slate-400 whitespace-normal" {...props} />
+                              ),
+                              pre: ({node, ...props}) => (
+                                <div className="overflow-x-auto w-full bg-slate-950 text-slate-100 p-4 rounded-xl my-4 font-mono text-xs" {...props} />
+                              ),
+                              code: ({node, ...props}) => (
+                                <code className="bg-slate-200/60 dark:bg-white/10 px-1 py-0.5 rounded font-mono text-[13px] text-slate-900 dark:text-slate-200 font-medium" {...props} />
+                              )
+                            }}
+                          >
+                            {msg.content}
+                          </Markdown>
+                        </div>
+                      )}
                     </div>
-                  ) : (
-                    <p className="whitespace-pre-wrap">{msg.content}</p>
-                  )}
+                  </div>
+
+                  {/* Interactive Option Toolbar (Edit and Copy) */}
+                  <div className={cn('flex items-center gap-3 px-1.5 py-0.5 text-slate-400 dark:text-slate-500', isUser ? 'justify-end' : 'pl-10 justify-start')}>
+                    <button
+                      onClick={() => handleCopy(msg.content, idx)}
+                      className="p-1 rounded-md hover:bg-slate-100 dark:hover:bg-white/5 hover:text-slate-600 dark:hover:text-slate-300 transition-colors flex items-center gap-1 text-[10px] font-bold bg-transparent border-0 cursor-pointer"
+                      title="Copy message text"
+                    >
+                      {copiedIdx === idx ? (
+                        <>
+                          <Check size={11} className="text-emerald-500" />
+                          <span className="text-emerald-500 font-bold">Copied!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy size={11} />
+                          <span>Copy</span>
+                        </>
+                      )}
+                    </button>
+
+                    {isUser && (
+                      <button
+                        onClick={() => handleEdit(msg.content)}
+                        className="p-1 rounded-md hover:bg-slate-100 dark:hover:bg-white/5 hover:text-slate-600 dark:hover:text-slate-300 transition-colors flex items-center gap-1 text-[10px] font-bold bg-transparent border-0 cursor-pointer"
+                        title="Edit and resubmit message"
+                      >
+                        <Pencil size={11} />
+                        <span>Edit</span>
+                      </button>
+                    )}
+                  </div>
                 </div>
-              </motion.div>
-            ))}
+              );
+            })}
 
             {isLoading && (
               <motion.div
@@ -438,10 +511,10 @@ const LexAI: React.FC = () => {
                 <div className="w-7 h-7 bg-slate-900 dark:bg-white/10 rounded-full flex items-center justify-center shrink-0 mt-1">
                   <Scale size={12} className="text-white dark:text-[#B4975A]" />
                 </div>
-                <div className="bg-slate-100 dark:bg-white/5 border border-slate-200/50 dark:border-white/5 rounded-2xl rounded-tl-md px-4 py-3.5">
+                <div className="bg-slate-100 dark:bg-white/5 border border-slate-200/50 dark:border-white/5 rounded-2xl rounded-tl-md px-4 py-3.5 shadow-xs">
                   <div className="flex items-center gap-2">
                     <Loader2 size={14} className="animate-spin text-blue-600 dark:text-[#B4975A]" />
-                    <span className="text-xs text-slate-500 dark:text-slate-400">Lex AI is reviewing the details...</span>
+                    <span className="text-xs text-slate-500 dark:text-slate-400">Lex AI is researching...</span>
                   </div>
                 </div>
               </motion.div>
@@ -451,7 +524,7 @@ const LexAI: React.FC = () => {
         )}
       </div>
 
-      {/* INPUT DOCK */}
+      {/* ==================== BOTTOM INPUT BAR ==================== */}
       <div className="shrink-0 px-3 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-white dark:bg-[#171717] border-t border-slate-200/50 dark:border-white/5 z-30">
         <div className="max-w-3xl mx-auto">
           <div className="relative bg-slate-100 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl focus-within:border-slate-400 dark:focus-within:border-white/20 focus-within:bg-white dark:focus-within:bg-white/10 transition-all">
@@ -490,7 +563,8 @@ const LexAI: React.FC = () => {
             </button>
           </div>
 
-          <div className="flex flex-col sm:flex-row justify-between items-center px-1 mt-1.5 text-[10px] text-slate-400 dark:text-slate-500 gap-1 text-center sm:text-left leading-tight">
+          {/* Legal Disclaimer */}
+          <div className="flex flex-col sm:flex-row justify-between items-center px-1 mt-2 text-[10px] text-slate-400 dark:text-slate-500 gap-1 text-center sm:text-left leading-tight">
             <span>{messagesRemaining} free inquiries left today.</span>
             <span>Lex AI provides legal information, not legal representation. Verify important legal advice and citations with a qualified lawyer.</span>
           </div>
