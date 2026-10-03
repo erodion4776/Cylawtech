@@ -31,7 +31,7 @@ serve(async (req) => {
     const url = new URL(req.url);
     const action = url.searchParams.get("action") || "send";
 
-    // 1. Fetch Conversations List
+    // Action: Get list
     if (action === "list") {
       try {
         const { data } = await supabase
@@ -45,7 +45,7 @@ serve(async (req) => {
       }
     }
 
-    // 2. Fetch Conversation History
+    // Action: Get history
     if (action === "history") {
       try {
         const { conversation_id } = await req.json();
@@ -60,7 +60,7 @@ serve(async (req) => {
       }
     }
 
-    // 3. Delete Conversation
+    // Action: Delete conversation
     if (action === "delete") {
       try {
         const { conversation_id } = await req.json();
@@ -71,13 +71,13 @@ serve(async (req) => {
       }
     }
 
-    // 4. Process User Legal Inquiry
+    // Process Chat Request
     const body = await req.json();
     const {
       message,
+      messages = [], // Full conversation thread from frontend
       conversation_id,
       jurisdiction = "Nigerian Law",
-      mode = "prep",
     } = body;
 
     if (!message || message.trim() === "") {
@@ -87,33 +87,23 @@ serve(async (req) => {
       });
     }
 
-    // Manage conversation session and prior memory
+    // Manage DB conversation record
     let convId = conversation_id;
-    let priorMessages: any[] = [];
-
     try {
       if (!convId) {
         const title = message.length > 35 ? message.substring(0, 35) + "..." : message;
         const { data: newConv } = await supabase
           .from("conversations")
-          .insert({ title, jurisdiction, mode })
+          .insert({ title, jurisdiction })
           .select()
           .single();
         if (newConv) convId = newConv.id;
-      } else {
-        const { data: prevMessages } = await supabase
-          .from("messages")
-          .select("role, content")
-          .eq("conversation_id", convId)
-          .order("created_at", { ascending: true })
-          .limit(20);
-        priorMessages = prevMessages || [];
       }
     } catch (e) {
-      console.warn("Conversation DB record skipped:", e);
+      console.warn("DB conversation skipped:", e);
     }
 
-    // Save user message to database
+    // Save user message to DB
     try {
       if (convId) {
         await supabase.from("messages").insert({
@@ -126,7 +116,7 @@ serve(async (req) => {
       console.warn("Message log skipped:", e);
     }
 
-    // Search Statutory Knowledge Base (optional, for RAG)
+    // Search knowledge library (RAG)
     let legalContext = "";
     try {
       const { data: matches } = await supabase.rpc("search_statutory_library", {
@@ -134,84 +124,68 @@ serve(async (req) => {
         p_jurisdiction: jurisdiction.toLowerCase().includes("nigeria") ? "nigeria" : "us",
         match_limit: 3,
       });
-
       if (matches && matches.length > 0) {
-        legalContext = matches
-          .map((m: any) => `[${m.document_title}] ${m.content}`)
-          .join("\n\n---\n\n");
+        legalContext = matches.map((m: any) => `[${m.document_title}] ${m.content}`).join("\n\n---\n\n");
       }
-    } catch (searchErr) {
-      console.warn("Knowledge library search skipped:", searchErr);
-    }
+    } catch { /* silent */ }
 
-    // STRICT SYSTEM PROMPT: Fact Gathering & Sequential Interviewing
-    const systemPrompt = `You are Lex AI, a senior legal counsel and interactive legal intelligence assistant.
+    // STRICT MULTI-STAGE LEGAL INTAKE SYSTEM PROMPT
+    const systemPrompt = `You are Lex AI, a senior legal practitioner and interactive legal assistant specializing in ${jurisdiction}.
 
-JURISDICTION: ${jurisdiction}
+PRIMARY BEHAVIOR RULES (MANDATORY):
+You behave like a lawyer conducting an in-person client consultation. A lawyer NEVER delivers a final legal opinion or full analysis immediately upon hearing a brief statement. You MUST first gather the necessary facts.
 
-YOUR MANDATE:
-You act like an experienced attorney conducting a structured client intake interview. You must NEVER provide a full legal analysis, IRAC block, or final conclusion in your first reply, or if key facts are missing. You must systematically gather information first.
+STAGE 1 — FACT GATHERING & CLARIFYING QUESTIONS (DEFAULT):
+When the user shares a problem, dispute, or question, check if you have all critical facts:
+1. What exact event or dispute occurred?
+2. Who are the parties (individuals, registered company under CAMA, government, landlord/tenant)?
+3. What is the timeline or relevant dates?
+4. Are there written documents (agreements, receipts, emails, chats, titles)?
+5. What specific outcome or remedy does the client want (money back, termination, compensation, defense)?
 
-THE INTAKE PROTOCOL (FOLLOW STRICTLY):
+IF CRITICAL FACTS ARE MISSING:
+- Empathize briefly and acknowledge their situation.
+- Ask 1 to 3 targeted, clear follow-up questions to understand the situation.
+- Explain briefly why those details matter under the law.
+- DO NOT provide a final conclusion or full legal breakdown yet. Keep responses under 5 sentences.
 
-STEP 1: ASSESS FACTS IN THE CONVERSATION HISTORY
-Review the entire message stream. Have you gathered clear, specific details regarding:
-- The corporate/legal structure of any parties involved (e.g. registered LLC, partnership, individual)?
-- The timeline (when did events happen)?
-- Specific transaction or monetary values involved?
-- The existence of written, signed agreements or communications?
-- The specific outcome or remedy the client wants to achieve?
+STAGE 2 — FULL LEGAL ANALYSIS (ONLY WHEN FACTS ARE COMPLETE):
+Only when the user has answered your follow-up questions and you have sufficient facts, provide your comprehensive legal opinion structured as follows:
 
-STEP 2: IF CRITICAL FACTS ARE MISSING (FACT-GATHERING PHASE)
-- Do NOT provide a formal legal opinion, conclusion, or cite specific case outcomes yet.
-- Compassionately acknowledge their statement.
-- Ask exactly ONE or TWO clear, highly specific follow-up questions to fill in the blank.
-- Explain briefly why those facts are necessary for the law.
-- Keep your response brief, reassuring, and conversational (3-5 sentences max).
+### 1. LEGAL ISSUES IDENTIFIED
+[State the exact legal question and dispute]
 
-STEP 3: WHEN ALL FACTS ARE KNOWN (FULL ANALYSIS PHASE)
-Only when you have sufficient details to draw a valid legal conclusion, deliver a structured analysis formatted EXACTLY as follows:
+### 2. APPLICABLE LAWS & STATUTORY RULES
+[Cite specific sections from Nigerian Acts, CAMA 2020, Constitution, or relevant case law]
 
-### LEGAL ISSUES IDENTIFIED
-[Clear summary of the legal conflicts]
+### 3. LEGAL ANALYSIS & APPLICATION
+[Apply the statutory rules directly to the client's concrete facts]
 
-### APPLICABLE LAWS & PRECEDENTS
-[Reference specific statutes, acts, or rules under ${jurisdiction}]
-
-### LEGAL ANALYSIS
-[Apply the rules step-by-step to the client's concrete facts]
-
-### RECOMMENDED NEXT STEPS
-[Actionable guidance and protective measures]
+### 4. STRATEGIC OPTIONS & RECOMMENDED NEXT STEPS
+[Clear, practical action items: demand letter, police report, mediation, litigation, etc.]
 
 ***
-⚖️ *Lex AI provides legal information, not legal representation. Verify important legal advice and citations with a qualified lawyer before taking formal action.*
+⚖️ *Lex AI provides legal information, not legal representation. Please consult a licensed Nigerian lawyer before taking formal legal action.*
 
-STYLE DIRECTIONS:
-- Write like a trusted, professional attorney (warm, logical, precise).
-- Address the client's specific facts directly—avoid generic essays.
-- Never manufacture rules or statutory provisions.
+${legalContext ? `\nRELEVANT STATUTORY REFERENCES:\n${legalContext}` : ""}`;
 
-${legalContext ? `\nRELEVANT LEGAL REFERENCE DOCUMENTS:\n${legalContext}` : ""}
+    // Construct full conversation history
+    const chatMessages: any[] = [{ role: "system", content: systemPrompt }];
 
-Analyze the dialogue history and respond accordingly.`;
-
-    const chatMessages: any[] = [
-      { role: "system", content: systemPrompt }
-    ];
-
-    // Build chat history context
-    priorMessages.forEach((m) => {
-      chatMessages.push({
-        role: m.role === "assistant" ? "assistant" : "user",
-        content: m.content
+    if (Array.isArray(messages) && messages.length > 0) {
+      messages.forEach((m: any) => {
+        if (m.content) {
+          chatMessages.push({
+            role: m.role === "assistant" ? "assistant" : "user",
+            content: m.content,
+          });
+        }
       });
-    });
+    } else {
+      chatMessages.push({ role: "user", content: message });
+    }
 
-    // Add current user turn
-    chatMessages.push({ role: "user", content: message });
-
-    // Active production models on Groq
+    // Active Groq models
     const activeModels = [
       "llama-3.1-8b-instant",
       "gemma2-9b-it",
@@ -226,26 +200,22 @@ Analyze the dialogue history and respond accordingly.`;
         const completion = await groq.chat.completions.create({
           model: modelName,
           messages: chatMessages,
-          temperature: 0.2, // Lower temperature enforces strict adherence to protocol
-          max_tokens: 1500,
+          temperature: 0.2, // Low temperature forces strict compliance
+          max_tokens: 1800,
         });
 
         reply = completion.choices[0]?.message?.content || "";
-        if (reply) {
-          console.log(`[Lex AI SUCCESS] Response generated using: ${modelName}`);
-          break;
-        }
+        if (reply) break;
       } catch (err: any) {
         lastError = err;
-        console.warn(`[Lex AI WARN] Model ${modelName} failed (${err.message}). Trying fallback...`);
       }
     }
 
     if (!reply) {
-      throw lastError || new Error("All active Groq models failed.");
+      throw lastError || new Error("All AI inference models failed.");
     }
 
-    // Save assistant reply to database
+    // Save assistant reply to DB
     try {
       if (convId) {
         await supabase.from("messages").insert({
@@ -255,7 +225,7 @@ Analyze the dialogue history and respond accordingly.`;
         });
       }
     } catch (e) {
-      console.warn("Assistant response log skipped:", e);
+      console.warn("Assistant DB insert skipped:", e);
     }
 
     return new Response(
@@ -268,7 +238,7 @@ Analyze the dialogue history and respond accordingly.`;
   } catch (error: any) {
     console.error("Chat Error:", error);
     return new Response(
-      JSON.stringify({ error: `AI Engine Error: ${error.message || "Failed to process inquiry"}` }),
+      JSON.stringify({ error: `AI Assistant Error: ${error.message || "Failed to process inquiry"}` }),
       { status: 500, headers: corsHeaders }
     );
   }
