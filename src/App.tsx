@@ -12,7 +12,6 @@ import LexAI from './pages/LexAI';
 import LexAIStandalone from './pages/LexAIStandalone';
 import AdminSaaS from './pages/AdminSaaS';
 import PageTransition from './components/PageTransition';
-import ScrollProgress from './components/ScrollProgress';
 
 const ScrollToTop = () => {
   const { pathname } = useLocation();
@@ -24,7 +23,7 @@ const AnimatedRoutes = () => {
   const location = useLocation();
   return (
     <AnimatePresence mode="wait">
-      <motion.div key={location.pathname} className="flex-grow flex flex-col">
+      <motion.div key={location.pathname} className="flex-1 flex flex-col min-h-0 w-full">
         <Routes location={location}>
           <Route path="/lex-ai-embed" element={<LexAIStandalone />} />
           <Route path="/lex-ai" element={<LexAI />} />
@@ -43,7 +42,6 @@ export default function App() {
   return (
     <Router>
       <ScrollToTop />
-      <ScrollProgress />
       <AppContent />
     </Router>
   );
@@ -56,9 +54,9 @@ const AppContent = () => {
   const hideChrome = isChat || isEmbed;
 
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="h-[100dvh] h-screen w-full flex flex-col overflow-hidden bg-white dark:bg-[#171717]">
       {!hideChrome && <Navbar />}
-      <main className="flex-grow flex flex-col">
+      <main className="flex-1 flex flex-col min-h-0 w-full overflow-hidden">
         <AnimatedRoutes />
       </main>
       {!hideChrome && <Footer />}
