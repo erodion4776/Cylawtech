@@ -66,8 +66,9 @@ const Home: React.FC = () => {
               Start a Free Legal Chat
               <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform" />
             </Link>
+            {/* UPDATED: Links directly to /how-it-works */}
             <Link
-              to="/about"
+              to="/how-it-works"
               className="w-full sm:w-auto bg-white hover:bg-slate-50 border border-slate-200 text-slate-800 px-8 py-4 rounded-2xl font-bold text-base shadow-sm flex items-center justify-center transition-all active:scale-95"
             >
               How Lex AI Works
@@ -273,6 +274,16 @@ const Home: React.FC = () => {
                 <p className="text-slate-400 text-sm leading-relaxed">{step.desc}</p>
               </motion.div>
             ))}
+          </div>
+
+          <div className="text-center mt-12">
+            <Link
+              to="/how-it-works"
+              className="inline-flex items-center gap-2 text-amber-400 hover:text-amber-300 font-bold text-sm hover:underline"
+            >
+              Explore the detailed guide on how Lex AI works
+              <ArrowRight size={14} />
+            </Link>
           </div>
         </div>
       </section>
