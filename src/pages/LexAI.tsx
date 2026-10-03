@@ -33,7 +33,7 @@ interface DailyUsage {
 }
 
 const LexAI: React.FC = () => {
-  useDocumentTitle('LexAI - Legal Intelligence');
+  useDocumentTitle('LexAI - Legal Assistant');
   const navigate = useNavigate();
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -46,7 +46,7 @@ const LexAI: React.FC = () => {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [showJurisdictionPicker, setShowJurisdictionPicker] = useState(false);
 
-  // Daily usage
+  // Daily usage tracking
   const [dailyUsage, setDailyUsage] = useState<DailyUsage>(() => {
     const today = new Date().toISOString().split('T')[0];
     const saved = localStorage.getItem('lexai_daily_usage');
@@ -68,13 +68,6 @@ const LexAI: React.FC = () => {
   useEffect(() => { scrollToBottom(); }, [messages, isLoading, scrollToBottom]);
   useEffect(() => { localStorage.setItem('lexai_daily_usage', JSON.stringify(dailyUsage)); }, [dailyUsage]);
   useEffect(() => { fetchConversations(); }, []);
-
-  // Close drawer on route / outside tap
-  useEffect(() => {
-    const handleResize = () => { if (window.innerWidth > 768) setDrawerOpen(false); };
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
 
   const fetchConversations = async () => {
     try {
@@ -127,7 +120,6 @@ const LexAI: React.FC = () => {
 
     const userMessage = input.trim();
     setInput('');
-    // Reset textarea height
     if (inputRef.current) inputRef.current.style.height = '48px';
     setMessages(prev => [...prev, { role: 'user', content: userMessage }]);
     setIsLoading(true);
@@ -153,7 +145,7 @@ const LexAI: React.FC = () => {
         fetchConversations();
       }
     } catch {
-      setMessages(prev => [...prev, { role: 'assistant', content: 'Unable to connect. Please try again.' }]);
+      setMessages(prev => [...prev, { role: 'assistant', content: 'Unable to connect to Lex AI. Please try again.' }]);
     } finally {
       setIsLoading(false);
     }
@@ -161,7 +153,6 @@ const LexAI: React.FC = () => {
 
   const messagesRemaining = Math.max(0, DAILY_LIMIT - (dailyUsage.date === new Date().toISOString().split('T')[0] ? dailyUsage.count : 0));
   const jurLabel = jurisdiction === 'nigeria' ? '🇳🇬 Nigerian Law' : '🇺🇸 US Law';
-  const modeLabels: Record<string, string> = { prep: 'IRAC Prep', training: 'Draft Critique', practice: 'Clause Drafting' };
 
   return (
     <div className="h-[100dvh] flex flex-col bg-white dark:bg-[#171717] overflow-hidden font-sans relative">
@@ -185,7 +176,7 @@ const LexAI: React.FC = () => {
               </div>
               <h2 className="text-xl font-black text-slate-900 dark:text-white mb-2">Daily Limit Reached</h2>
               <p className="text-slate-500 dark:text-slate-400 text-sm mb-6 leading-relaxed">
-                You have used all {DAILY_LIMIT} free inquiries for today. Your limit resets automatically tomorrow, or upgrade now for unlimited access.
+                You have reached your limit of {DAILY_LIMIT} free inquiries for today. Your daily limit will automatically reset tomorrow, or unlock unlimited queries with professional counsel access.
               </p>
               <div className="grid grid-cols-2 gap-3 mb-6">
                 <div className="p-4 rounded-2xl bg-slate-50 dark:bg-[#252525] border border-slate-200 dark:border-slate-700 text-left">
@@ -199,7 +190,7 @@ const LexAI: React.FC = () => {
                 </div>
               </div>
               <button onClick={() => navigate('/contact')} className="w-full py-3.5 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl font-bold text-sm transition-all">
-                Upgrade Access
+                Request Unlimited Access
               </button>
               <button onClick={() => setShowPaywall(false)} className="mt-3 text-xs text-slate-400 hover:text-slate-600">
                 Dismiss
@@ -213,13 +204,11 @@ const LexAI: React.FC = () => {
       <AnimatePresence>
         {drawerOpen && (
           <>
-            {/* Backdrop */}
             <motion.div
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               onClick={() => setDrawerOpen(false)}
               className="fixed inset-0 z-[100] bg-black/30 backdrop-blur-[4px]"
             />
-            {/* Drawer Panel */}
             <motion.aside
               initial={{ x: '-100%' }} animate={{ x: 0 }} exit={{ x: '-100%' }}
               transition={{ type: 'spring', damping: 28, stiffness: 260 }}
@@ -301,7 +290,6 @@ const LexAI: React.FC = () => {
 
       {/* ==================== STICKY TOP HEADER ==================== */}
       <header className="shrink-0 flex items-center justify-between px-3 py-2.5 bg-white dark:bg-[#171717] border-b border-slate-200 dark:border-white/5 safe-area-inset-top z-50">
-        {/* Left: Menu Toggle */}
         <button
           onClick={() => setDrawerOpen(true)}
           className="p-2 rounded-xl hover:bg-slate-100 dark:hover:bg-white/5 text-slate-700 dark:text-slate-300 transition-colors active:scale-95"
@@ -309,7 +297,6 @@ const LexAI: React.FC = () => {
           <Menu size={20} />
         </button>
 
-        {/* Center: Jurisdiction / Mode Selector */}
         <button
           onClick={() => setShowJurisdictionPicker(!showJurisdictionPicker)}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl hover:bg-slate-100 dark:hover:bg-white/5 transition-colors active:scale-95"
@@ -319,7 +306,6 @@ const LexAI: React.FC = () => {
           <ChevronDown size={14} className={cn('text-slate-400 transition-transform', showJurisdictionPicker && 'rotate-180')} />
         </button>
 
-        {/* Right: New Chat */}
         <button
           onClick={startNewChat}
           className="p-2 rounded-xl hover:bg-slate-100 dark:hover:bg-white/5 text-slate-700 dark:text-slate-300 transition-colors active:scale-95"
@@ -335,7 +321,6 @@ const LexAI: React.FC = () => {
             initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}
             className="absolute top-[52px] left-1/2 -translate-x-1/2 z-50 w-[280px] bg-white dark:bg-[#1e1e1e] rounded-2xl shadow-2xl border border-slate-200 dark:border-white/10 p-3 space-y-3"
           >
-            {/* Jurisdiction */}
             <div>
               <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-2 px-1">Jurisdiction</p>
               <div className="grid grid-cols-2 gap-1.5">
@@ -359,9 +344,8 @@ const LexAI: React.FC = () => {
               </div>
             </div>
 
-            {/* Mode */}
             <div>
-              <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-2 px-1">Research Mode</p>
+              <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-2 px-1">Focus Mode</p>
               <div className="grid grid-cols-3 gap-1.5">
                 {[
                   { value: 'prep' as const, label: '📖 IRAC' },
@@ -394,38 +378,41 @@ const LexAI: React.FC = () => {
         )}
       </AnimatePresence>
 
-      {/* Close picker on outside click */}
       {showJurisdictionPicker && (
         <div className="fixed inset-0 z-40" onClick={() => setShowJurisdictionPicker(false)} />
       )}
 
-      {/* ==================== MESSAGES AREA ==================== */}
+      {/* ==================== MESSAGES & LANDING VIEW ==================== */}
       <div className="flex-grow overflow-y-auto overscroll-contain">
         {messages.length === 0 ? (
-          /* Empty State */
-          <div className="h-full flex flex-col items-center justify-center px-6 text-center">
-            <div className="w-14 h-14 bg-slate-900 dark:bg-white/10 rounded-2xl flex items-center justify-center mb-5">
-              <Scale size={24} className="text-white dark:text-[#B4975A]" />
+          /* Empty State / Landing View */
+          <div className="h-full flex flex-col items-center justify-center px-6 py-8 text-center max-w-lg mx-auto">
+            <div className="w-14 h-14 bg-slate-900 dark:bg-white/10 rounded-2xl flex items-center justify-center mb-4 shadow-sm">
+              <Scale size={26} className="text-white dark:text-[#B4975A]" />
             </div>
-            <h2 className="text-2xl font-black text-slate-900 dark:text-white mb-2 tracking-tight">
-              How can I assist your research?
+            
+            {/* New Main Heading */}
+            <h2 className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white mb-2 tracking-tight">
+              Hi, I’m Lex AI. How can I help you today?
             </h2>
-            <p className="text-slate-500 dark:text-slate-400 text-sm mb-8 max-w-sm leading-relaxed">
-              Explore legal precedents, draft professional clauses, or get constructive feedback on your legal briefs.
+            
+            {/* New Subtitle */}
+            <p className="text-slate-500 dark:text-slate-400 text-xs sm:text-sm mb-7 leading-relaxed max-w-md">
+              Your AI legal assistant. Ask legal questions, research legal issues, draft and review contracts and other legal documents, and get practical guidance on your legal matters.
             </p>
 
-            {/* Prompt Suggestions */}
-            <div className="w-full max-w-sm space-y-2">
+            {/* Four Specific Suggested Prompts */}
+            <div className="w-full space-y-2.5">
               {[
-                'What are the requirements for company registration in Nigeria?',
-                'Draft a non-disclosure agreement clause.',
-                'Explain the IRAC legal analysis framework.',
-                'What are key provisions of the Data Protection Act?',
+                'Help me understand a legal issue.',
+                'Research a Nigerian law or legal precedent.',
+                'Draft a contract or legal document.',
+                'Review a contract or legal document.',
               ].map((suggestion) => (
                 <button
                   key={suggestion}
                   onClick={() => { setInput(suggestion); inputRef.current?.focus(); }}
-                  className="w-full text-left p-3.5 rounded-2xl border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 hover:bg-slate-50 dark:hover:bg-white/10 text-xs font-medium text-slate-700 dark:text-slate-300 transition-all active:scale-[0.98]"
+                  className="w-full text-left p-3.5 rounded-2xl border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 hover:bg-slate-50 dark:hover:bg-white/10 text-xs sm:text-sm font-medium text-slate-700 dark:text-slate-200 transition-all active:scale-[0.98] shadow-xs"
                 >
                   {suggestion}
                 </button>
@@ -433,7 +420,7 @@ const LexAI: React.FC = () => {
             </div>
           </div>
         ) : (
-          /* Chat Messages */
+          /* Chat Stream */
           <div className="max-w-3xl mx-auto px-4 py-6 space-y-5">
             {messages.map((msg, idx) => (
               <motion.div
@@ -478,7 +465,7 @@ const LexAI: React.FC = () => {
                 <div className="bg-slate-100 dark:bg-white/5 border border-slate-200/50 dark:border-white/5 rounded-2xl rounded-tl-md px-4 py-3.5">
                   <div className="flex items-center gap-2">
                     <Loader2 size={14} className="animate-spin text-blue-600 dark:text-[#B4975A]" />
-                    <span className="text-xs text-slate-500 dark:text-slate-400">Researching legal sources...</span>
+                    <span className="text-xs text-slate-500 dark:text-slate-400">Lex AI is researching...</span>
                   </div>
                 </div>
               </motion.div>
@@ -488,7 +475,7 @@ const LexAI: React.FC = () => {
         )}
       </div>
 
-      {/* ==================== STICKY BOTTOM INPUT BAR ==================== */}
+      {/* ==================== STICKY BOTTOM INPUT BAR & DISCLAIMER ==================== */}
       <div className="shrink-0 px-3 pb-3 pt-2 bg-white dark:bg-[#171717] border-t border-slate-200/50 dark:border-white/5 safe-area-inset-bottom">
         <div className="max-w-3xl mx-auto">
           <div className="relative bg-slate-100 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl focus-within:border-slate-400 dark:focus-within:border-white/20 focus-within:bg-white dark:focus-within:bg-white/10 transition-all">
@@ -502,7 +489,8 @@ const LexAI: React.FC = () => {
                   sendMessage();
                 }
               }}
-              placeholder="Ask a legal question..."
+              /* Simplified Placeholder */
+              placeholder="Ask Lex AI a legal question…"
               rows={1}
               className="w-full pl-4 pr-12 py-3.5 bg-transparent text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 outline-none resize-none max-h-28"
               style={{ minHeight: '48px' }}
@@ -525,9 +513,11 @@ const LexAI: React.FC = () => {
               {isLoading ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
             </button>
           </div>
-          <div className="flex justify-between items-center px-1 mt-1.5 text-[10px] text-slate-400 dark:text-slate-500">
-            <span>{messagesRemaining} free inquiries remaining today</span>
-            <span>Verify citations with counsel</span>
+
+          {/* New Expanded Legal Disclaimer Footer */}
+          <div className="flex flex-col sm:flex-row justify-between items-center px-1 mt-2 text-[10px] text-slate-400 dark:text-slate-500 gap-1 text-center sm:text-left leading-tight">
+            <span>{messagesRemaining} free inquiries left today.</span>
+            <span>Lex AI provides legal information, not legal representation. Verify important legal advice and citations with a qualified lawyer.</span>
           </div>
         </div>
       </div>
