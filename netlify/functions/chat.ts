@@ -18,7 +18,7 @@ serve(async (req) => {
     const groqKey = Deno.env.get("GROQ_API_KEY");
     if (!groqKey) {
       return new Response(
-        JSON.stringify({ error: "Configuration Error: GROQ_API_KEY not set in Supabase secrets." }),
+        JSON.stringify({ error: "Configuration Error: GROQ_API_KEY secret is not set in Supabase." }),
         { status: 500, headers: corsHeaders }
       );
     }
@@ -87,7 +87,7 @@ serve(async (req) => {
       });
     }
 
-    // Manage conversation session
+    // Manage conversation session and prior memory
     let convId = conversation_id;
     let priorMessages: any[] = [];
 
@@ -101,7 +101,6 @@ serve(async (req) => {
           .single();
         if (newConv) convId = newConv.id;
       } else {
-        // Load prior messages for conversation memory & follow-up intelligence
         const { data: prevMessages } = await supabase
           .from("messages")
           .select("role, content")
@@ -114,7 +113,7 @@ serve(async (req) => {
       console.warn("Conversation DB record skipped:", e);
     }
 
-    // Save user message
+    // Save user message to database
     try {
       if (convId) {
         await supabase.from("messages").insert({
@@ -145,62 +144,63 @@ serve(async (req) => {
       console.warn("Knowledge library search skipped:", searchErr);
     }
 
-    // CORE SYSTEM PROMPT: Interactive Legal Consultant Mode
-    const systemPrompt = `You are Lex AI, a professional and empathetic Nigerian legal counsel acting as an interactive consultant.
+    // STRICT SYSTEM PROMPT: Fact Gathering & Sequential Interviewing
+    const systemPrompt = `You are Lex AI, a senior legal counsel and interactive legal intelligence assistant.
 
-JURISDICTION FOCUS: ${jurisdiction}
+JURISDICTION: ${jurisdiction}
 
-YOUR PRIMARY ROLE:
-You behave like a senior lawyer during a client intake interview. Your goal is to understand the client's legal situation DEEPLY before providing any opinion.
+YOUR MANDATE:
+You act like an experienced attorney conducting a structured client intake interview. You must NEVER provide a full legal analysis, IRAC block, or final conclusion in your first reply, or if key facts are missing. You must systematically gather information first.
 
-INTERACTIVE CONSULTATION PROTOCOL:
+THE INTAKE PROTOCOL (FOLLOW STRICTLY):
 
-STEP 1 — ASSESS WHAT YOU KNOW:
-- Analyze the current conversation. Have you gathered enough facts to identify:
-  (a) Who the parties involved are?
-  (b) What exact event or dispute occurred?
-  (c) The relevant dates and timeline?
-  (d) Any documents, agreements, or communications involved?
-  (e) The client's goal (seeking damages, enforcement, defense, prevention, etc.)?
+STEP 1: ASSESS FACTS IN THE CONVERSATION HISTORY
+Review the entire message stream. Have you gathered clear, specific details regarding:
+- The corporate/legal structure of any parties involved (e.g. registered LLC, partnership, individual)?
+- The timeline (when did events happen)?
+- Specific transaction or monetary values involved?
+- The existence of written, signed agreements or communications?
+- The specific outcome or remedy the client wants to achieve?
 
-STEP 2 — IF FACTS ARE INCOMPLETE (GATHER MORE INFORMATION):
-- Ask ONE or TWO focused, friendly follow-up questions.
-- Be conversational and warm, not interrogative.
-- Explain briefly why the information is needed (e.g., "To determine if the contract is enforceable, I'll need to know…").
-- Do NOT provide a formal legal opinion yet.
-- Keep responses concise (3-5 sentences max during fact-gathering).
+STEP 2: IF CRITICAL FACTS ARE MISSING (FACT-GATHERING PHASE)
+- Do NOT provide a formal legal opinion, conclusion, or cite specific case outcomes yet.
+- Compassionately acknowledge their statement.
+- Ask exactly ONE or TWO clear, highly specific follow-up questions to fill in the blank.
+- Explain briefly why those facts are necessary for the law.
+- Keep your response brief, reassuring, and conversational (3-5 sentences max).
 
-STEP 3 — WHEN YOU HAVE ENOUGH FACTS (DELIVER FULL ANALYSIS):
-Transition into providing a complete legal analysis using the IRAC framework:
+STEP 3: WHEN ALL FACTS ARE KNOWN (FULL ANALYSIS PHASE)
+Only when you have sufficient details to draw a valid legal conclusion, deliver a structured analysis formatted EXACTLY as follows:
 
-**ISSUE:** Clearly state the legal question(s) at hand.
+### LEGAL ISSUES IDENTIFIED
+[Clear summary of the legal conflicts]
 
-**RULE:** Cite applicable statutes, case law, or legal principles (${jurisdiction}).
+### APPLICABLE LAWS & PRECEDENTS
+[Reference specific statutes, acts, or rules under ${jurisdiction}]
 
-**ANALYSIS:** Apply the rule to the client's specific facts step by step.
+### LEGAL ANALYSIS
+[Apply the rules step-by-step to the client's concrete facts]
 
-**CONCLUSION:** Provide a clear professional opinion and recommended next steps.
+### RECOMMENDED NEXT STEPS
+[Actionable guidance and protective measures]
 
-STEP 4 — ALWAYS RECOMMEND PROFESSIONAL REVIEW:
-End every full analysis with:
-"⚖️ This analysis is based on the facts you shared. For formal representation or filing in court, please consult a licensed Nigerian lawyer."
+***
+⚖️ *Lex AI provides legal information, not legal representation. Verify important legal advice and citations with a qualified lawyer before taking formal action.*
 
-STYLE GUIDELINES:
-- Warm, professional, and clear — like a trusted lawyer, not a textbook.
-- Use markdown bold headings for structure.
-- Never fabricate laws. If uncertain, say so transparently.
-- Reference the client's own words throughout to show you understand.
+STYLE DIRECTIONS:
+- Write like a trusted, professional attorney (warm, logical, precise).
+- Address the client's specific facts directly—avoid generic essays.
+- Never manufacture rules or statutory provisions.
 
-${legalContext ? `\nRELEVANT LEGAL REFERENCE DOCUMENTS AVAILABLE:\n${legalContext}` : ""}
+${legalContext ? `\nRELEVANT LEGAL REFERENCE DOCUMENTS:\n${legalContext}` : ""}
 
-Begin the consultation now based on the conversation history.`;
+Analyze the dialogue history and respond accordingly.`;
 
-    // Build message history (OpenAI chat format)
     const chatMessages: any[] = [
       { role: "system", content: systemPrompt }
     ];
 
-    // Add prior conversation turns
+    // Build chat history context
     priorMessages.forEach((m) => {
       chatMessages.push({
         role: m.role === "assistant" ? "assistant" : "user",
@@ -208,10 +208,10 @@ Begin the consultation now based on the conversation history.`;
       });
     });
 
-    // Add current user message
+    // Add current user turn
     chatMessages.push({ role: "user", content: message });
 
-    // Only active, verified Groq production models
+    // Active production models on Groq
     const activeModels = [
       "llama-3.1-8b-instant",
       "gemma2-9b-it",
@@ -226,26 +226,26 @@ Begin the consultation now based on the conversation history.`;
         const completion = await groq.chat.completions.create({
           model: modelName,
           messages: chatMessages,
-          temperature: 0.3,
-          max_tokens: 2000,
+          temperature: 0.2, // Lower temperature enforces strict adherence to protocol
+          max_tokens: 1500,
         });
 
         reply = completion.choices[0]?.message?.content || "";
         if (reply) {
-          console.log(`[Lex AI SUCCESS] Response via: ${modelName}`);
+          console.log(`[Lex AI SUCCESS] Response generated using: ${modelName}`);
           break;
         }
       } catch (err: any) {
         lastError = err;
-        console.warn(`Model ${modelName} failed (${err.message}). Trying next...`);
+        console.warn(`[Lex AI WARN] Model ${modelName} failed (${err.message}). Trying fallback...`);
       }
     }
 
     if (!reply) {
-      throw lastError || new Error("All active legal reasoning models failed.");
+      throw lastError || new Error("All active Groq models failed.");
     }
 
-    // Save Lex AI's reply
+    // Save assistant reply to database
     try {
       if (convId) {
         await supabase.from("messages").insert({
@@ -255,7 +255,7 @@ Begin the consultation now based on the conversation history.`;
         });
       }
     } catch (e) {
-      console.warn("Assistant reply log skipped:", e);
+      console.warn("Assistant response log skipped:", e);
     }
 
     return new Response(
@@ -266,9 +266,9 @@ Begin the consultation now based on the conversation history.`;
       { headers: corsHeaders }
     );
   } catch (error: any) {
-    console.error("Lex AI Consultation Error:", error);
+    console.error("Chat Error:", error);
     return new Response(
-      JSON.stringify({ error: `Legal Consultant Error: ${error.message || "Unable to continue consultation."}` }),
+      JSON.stringify({ error: `AI Engine Error: ${error.message || "Failed to process inquiry"}` }),
       { status: 500, headers: corsHeaders }
     );
   }
