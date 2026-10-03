@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Menu, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { cn } from '@/src/lib/utils';
+import { cn } from '../lib/utils';
 
 const Navbar = () => {
   const [isOpen, setIsOpen] = useState(false);
@@ -19,7 +19,8 @@ const Navbar = () => {
 
   const navLinks = [
     { name: 'Home', path: '/' },
-    { name: 'LexAI Playground', path: '/lex-ai' },
+    { name: 'How It Works', path: '/how-it-works' },
+    { name: 'Lex AI Chat', path: '/lex-ai' },
     { name: 'About', path: '/about' },
     { name: 'Contact', path: '/contact' },
   ];
