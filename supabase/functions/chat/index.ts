@@ -31,7 +31,7 @@ serve(async (req) => {
     const url = new URL(req.url);
     const action = url.searchParams.get("action") || "send";
 
-    // Action: Get list
+    // 1. Action: Get conversations list
     if (action === "list") {
       try {
         const { data } = await supabase
@@ -45,7 +45,7 @@ serve(async (req) => {
       }
     }
 
-    // Action: Get history
+    // 2. Action: Get conversation history
     if (action === "history") {
       try {
         const { conversation_id } = await req.json();
@@ -60,7 +60,7 @@ serve(async (req) => {
       }
     }
 
-    // Action: Delete conversation
+    // 3. Action: Delete conversation
     if (action === "delete") {
       try {
         const { conversation_id } = await req.json();
@@ -71,11 +71,11 @@ serve(async (req) => {
       }
     }
 
-    // Process Chat Request
+    // 4. Process Chat Message
     const body = await req.json();
     const {
       message,
-      messages = [], // Full conversation thread from frontend
+      messages = [], // Full chat history from frontend
       conversation_id,
       jurisdiction = "Nigerian Law",
     } = body;
@@ -87,7 +87,7 @@ serve(async (req) => {
       });
     }
 
-    // Manage DB conversation record
+    // Manage conversation in database
     let convId = conversation_id;
     try {
       if (!convId) {
@@ -100,10 +100,10 @@ serve(async (req) => {
         if (newConv) convId = newConv.id;
       }
     } catch (e) {
-      console.warn("DB conversation skipped:", e);
+      console.warn("DB conversation creation skipped:", e);
     }
 
-    // Save user message to DB
+    // Save user message to database
     try {
       if (convId) {
         await supabase.from("messages").insert({
@@ -113,7 +113,7 @@ serve(async (req) => {
         });
       }
     } catch (e) {
-      console.warn("Message log skipped:", e);
+      console.warn("User message log skipped:", e);
     }
 
     // Search knowledge library (RAG)
@@ -130,7 +130,7 @@ serve(async (req) => {
     } catch { /* silent */ }
 
     // STRICT MULTI-STAGE LEGAL INTAKE SYSTEM PROMPT
-    const systemPrompt = `You are Lex AI, a seasoned legal practitioner acting as an interactive client-consultant.
+    const systemPrompt = `You are Lex AI, a seasoned Nigerian legal practitioner acting as an interactive client-consultant.
 
 JURISDICTION: ${jurisdiction}
 
@@ -175,11 +175,11 @@ ${legalContext ? `\nRELEVANT STATUTORY REFERENCES:\n${legalContext}` : ""}`;
       chatMessages.push({ role: "user", content: message });
     }
 
-    // Active Groq models
+    // ONLY active, verified production models on Groq
     const activeModels = [
-      "llama-3.1-8b-instant",
-      "gemma2-9b-it",
-      "llama-3.2-3b-preview"
+      "llama-3.1-8b-instant",  // Active Production (560 t/sec) - Primary
+      "openai/gpt-oss-20b",     // Active Production (1000 t/sec) - Fallback 1
+      "openai/gpt-oss-120b"     // Active Production (500 t/sec) - Fallback 2
     ];
 
     let reply = "";
@@ -190,19 +190,23 @@ ${legalContext ? `\nRELEVANT STATUTORY REFERENCES:\n${legalContext}` : ""}`;
         const completion = await groq.chat.completions.create({
           model: modelName,
           messages: chatMessages,
-          temperature: 0.1, // Set temperature very low to enforce strict adherence to the prompt rules
+          temperature: 0.1, // Low temperature forces strict intake protocol
           max_tokens: 1500,
         });
 
         reply = completion.choices[0]?.message?.content || "";
-        if (reply) break;
+        if (reply) {
+          console.log(`[Lex AI SUCCESS] Generated response with: ${modelName}`);
+          break;
+        }
       } catch (err: any) {
         lastError = err;
+        console.warn(`[Lex AI WARN] Model ${modelName} failed (${err.message}). Trying fallback...`);
       }
     }
 
     if (!reply) {
-      throw lastError || new Error("All AI inference models failed.");
+      throw lastError || new Error("All active Groq models failed.");
     }
 
     // Save assistant reply to DB
