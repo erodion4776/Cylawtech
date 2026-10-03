@@ -42,7 +42,6 @@ const LexAI: React.FC = () => {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [jurisdiction, setJurisdiction] = useState<'nigeria' | 'us'>('nigeria');
-  const [mode, setMode] = useState<'prep' | 'training' | 'practice'>('prep');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [showJurisdictionPicker, setShowJurisdictionPicker] = useState(false);
 
@@ -121,7 +120,10 @@ const LexAI: React.FC = () => {
 
     setInput('');
     if (inputRef.current) inputRef.current.style.height = '48px';
-    setMessages(prev => [...prev, { role: 'user', content: textToSend }]);
+
+    // Build current conversation history including the new user message
+    const updatedMessages: Message[] = [...messages, { role: 'user', content: textToSend }];
+    setMessages(updatedMessages);
     setIsLoading(true);
     setDailyUsage({ count: currentCount + 1, date: today });
 
@@ -131,9 +133,9 @@ const LexAI: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: textToSend,
+          messages: updatedMessages, // Sends full conversation memory
           conversation_id: activeConvId,
           jurisdiction: jurisdiction === 'nigeria' ? 'Nigerian Law' : 'US Federal Law',
-          mode,
         }),
       });
       const data = await res.json();
@@ -145,7 +147,7 @@ const LexAI: React.FC = () => {
         fetchConversations();
       }
     } catch {
-      setMessages(prev => [...prev, { role: 'assistant', content: 'Unable to connect to Lex AI. Please check your connection and try again.' }]);
+      setMessages(prev => [...prev, { role: 'assistant', content: 'Unable to connect to Lex AI. Please check your internet connection and try again.' }]);
     } finally {
       setIsLoading(false);
     }
@@ -157,7 +159,7 @@ const LexAI: React.FC = () => {
   return (
     <div className="fixed inset-0 h-[100dvh] w-full flex flex-col overflow-hidden bg-white dark:bg-[#171717] font-sans select-none">
 
-      {/* ==================== PAYWALL MODAL ==================== */}
+      {/* PAYWALL MODAL */}
       <AnimatePresence>
         {showPaywall && (
           <motion.div
@@ -200,7 +202,7 @@ const LexAI: React.FC = () => {
         )}
       </AnimatePresence>
 
-      {/* ==================== SLIDE-OUT DRAWER ==================== */}
+      {/* SLIDE-OUT DRAWER */}
       <AnimatePresence>
         {drawerOpen && (
           <>
@@ -284,7 +286,7 @@ const LexAI: React.FC = () => {
         )}
       </AnimatePresence>
 
-      {/* ==================== STICKY TOP HEADER ==================== */}
+      {/* HEADER */}
       <header className="shrink-0 h-14 flex items-center justify-between px-3 bg-white dark:bg-[#171717] border-b border-slate-200 dark:border-white/5 z-30 pt-[env(safe-area-inset-top)]">
         <button
           onClick={() => setDrawerOpen(true)}
@@ -312,7 +314,7 @@ const LexAI: React.FC = () => {
         </button>
       </header>
 
-      {/* Jurisdiction Picker Modal */}
+      {/* JURISDICTION PICKER */}
       <AnimatePresence>
         {showJurisdictionPicker && (
           <motion.div
@@ -342,30 +344,6 @@ const LexAI: React.FC = () => {
               </div>
             </div>
 
-            <div>
-              <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-2 px-1">Focus Mode</p>
-              <div className="grid grid-cols-3 gap-1.5">
-                {[
-                  { value: 'prep' as const, label: '📖 IRAC' },
-                  { value: 'training' as const, label: '🧠 Critique' },
-                  { value: 'practice' as const, label: '⚖️ Draft' },
-                ].map((m) => (
-                  <button
-                    key={m.value}
-                    onClick={() => setMode(m.value)}
-                    className={cn(
-                      'px-2 py-2.5 rounded-xl text-[11px] font-semibold transition-all active:scale-95',
-                      mode === m.value
-                        ? 'bg-slate-900 dark:bg-white text-white dark:text-black'
-                        : 'bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-300'
-                    )}
-                  >
-                    {m.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
             <button
               onClick={() => setShowJurisdictionPicker(false)}
               className="w-full py-2 text-xs font-bold text-slate-400 hover:text-slate-600 transition-colors"
@@ -380,7 +358,7 @@ const LexAI: React.FC = () => {
         <div className="fixed inset-0 z-30" onClick={() => setShowJurisdictionPicker(false)} />
       )}
 
-      {/* ==================== MESSAGES & LANDING VIEW (FLEX-1 SCROLL CONTAINER) ==================== */}
+      {/* MESSAGES & LANDING VIEW */}
       <div className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain px-4 py-4">
         {messages.length === 0 ? (
           /* Landing Screen */
@@ -463,7 +441,7 @@ const LexAI: React.FC = () => {
                 <div className="bg-slate-100 dark:bg-white/5 border border-slate-200/50 dark:border-white/5 rounded-2xl rounded-tl-md px-4 py-3.5">
                   <div className="flex items-center gap-2">
                     <Loader2 size={14} className="animate-spin text-blue-600 dark:text-[#B4975A]" />
-                    <span className="text-xs text-slate-500 dark:text-slate-400">Lex AI is researching...</span>
+                    <span className="text-xs text-slate-500 dark:text-slate-400">Lex AI is reviewing the details...</span>
                   </div>
                 </div>
               </motion.div>
@@ -473,7 +451,7 @@ const LexAI: React.FC = () => {
         )}
       </div>
 
-      {/* ==================== PINNED BOTTOM INPUT DOCK ==================== */}
+      {/* INPUT DOCK */}
       <div className="shrink-0 px-3 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-white dark:bg-[#171717] border-t border-slate-200/50 dark:border-white/5 z-30">
         <div className="max-w-3xl mx-auto">
           <div className="relative bg-slate-100 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl focus-within:border-slate-400 dark:focus-within:border-white/20 focus-within:bg-white dark:focus-within:bg-white/10 transition-all">
@@ -514,7 +492,7 @@ const LexAI: React.FC = () => {
 
           <div className="flex flex-col sm:flex-row justify-between items-center px-1 mt-1.5 text-[10px] text-slate-400 dark:text-slate-500 gap-1 text-center sm:text-left leading-tight">
             <span>{messagesRemaining} free inquiries left today.</span>
-            <span>Lex AI provides legal information, not legal representation. Verify important advice with a lawyer.</span>
+            <span>Lex AI provides legal information, not legal representation. Verify important legal advice and citations with a qualified lawyer.</span>
           </div>
         </div>
       </div>
