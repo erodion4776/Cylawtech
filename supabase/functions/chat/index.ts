@@ -10,7 +10,6 @@ const corsHeaders = {
 };
 
 serve(async (req) => {
-  // Handle CORS Preflight
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
@@ -32,7 +31,7 @@ serve(async (req) => {
     const url = new URL(req.url);
     const action = url.searchParams.get("action") || "send";
 
-    // 1. Action: Get Conversations List
+    // Action: Get list
     if (action === "list") {
       try {
         const { data } = await supabase
@@ -46,7 +45,7 @@ serve(async (req) => {
       }
     }
 
-    // 2. Action: Get Conversation History
+    // Action: Get history
     if (action === "history") {
       try {
         const { conversation_id } = await req.json();
@@ -61,7 +60,7 @@ serve(async (req) => {
       }
     }
 
-    // 3. Action: Delete Conversation
+    // Action: Delete conversation
     if (action === "delete") {
       try {
         const { conversation_id } = await req.json();
@@ -72,13 +71,13 @@ serve(async (req) => {
       }
     }
 
-    // 4. Process User Legal Inquiry
+    // Process Chat Request
     const body = await req.json();
     const {
       message,
+      messages = [], // Full conversation thread from frontend
       conversation_id,
       jurisdiction = "Nigerian Law",
-      mode = "prep",
     } = body;
 
     if (!message || message.trim() === "") {
@@ -88,23 +87,23 @@ serve(async (req) => {
       });
     }
 
-    // Manage conversation session safely
+    // Manage DB conversation record
     let convId = conversation_id;
     try {
       if (!convId) {
         const title = message.length > 35 ? message.substring(0, 35) + "..." : message;
         const { data: newConv } = await supabase
           .from("conversations")
-          .insert({ title, jurisdiction, mode })
+          .insert({ title, jurisdiction })
           .select()
           .single();
         if (newConv) convId = newConv.id;
       }
     } catch (e) {
-      console.warn("Conversation DB record skipped:", e);
+      console.warn("DB conversation skipped:", e);
     }
 
-    // Save user message to database
+    // Save user message to DB
     try {
       if (convId) {
         await supabase.from("messages").insert({
@@ -117,75 +116,96 @@ serve(async (req) => {
       console.warn("Message log skipped:", e);
     }
 
-    // Mode-specific legal directives
-    let stageDirective = "Focus on structured IRAC legal analysis (Issue, Rule, Application, Conclusion).";
-    if (mode === "training") {
-      stageDirective = "Act as senior legal mentor. Critique reasoning and provide statutory recommendations.";
-    } else if (mode === "practice") {
-      stageDirective = "Draft precise legal clauses, contracts, or statutory advice.";
-    }
+    // Search knowledge library (RAG)
+    let legalContext = "";
+    try {
+      const { data: matches } = await supabase.rpc("search_statutory_library", {
+        query_text: message,
+        p_jurisdiction: jurisdiction.toLowerCase().includes("nigeria") ? "nigeria" : "us",
+        match_limit: 3,
+      });
+      if (matches && matches.length > 0) {
+        legalContext = matches.map((m: any) => `[${m.document_title}] ${m.content}`).join("\n\n---\n\n");
+      }
+    } catch { /* silent */ }
 
-    const systemPrompt = `You are LexAI, a high-level legal intelligence counsel.
+    // STRICT MULTI-STAGE LEGAL INTAKE SYSTEM PROMPT
+    const systemPrompt = `You are Lex AI, a seasoned legal practitioner acting as an interactive client-consultant.
 
 JURISDICTION: ${jurisdiction}
 
-PRIMARY OBJECTIVE:
-${stageDirective}
+YOUR ABSOLUTE MANDATE:
+You are conducting a strict, sequential client intake interview. You are FORBIDDEN from giving a final legal opinion, structured analysis, or IRAC block in your early responses. You must ALWAYS guide the client by asking targeted follow-up questions first.
 
-GUIDELINES:
-- Provide structured, formal, and authoritative legal analysis.
-- Use numbered points and bold headings.
-- Reference relevant statutory provisions, principles, and case law where applicable.
-- Answer clearly, directly, and concisely.`;
+THE INTAKE RULES (MANDATORY):
+1. ALWAYS ASK FOLLOW-UP QUESTIONS: Every single response you make MUST contain 1 to 2 targeted follow-up questions to gather necessary context.
+2. DO NOT ANSWER YET: Even if you think you have enough facts to solve the problem, do not provide a final legal conclusion or full structured analysis. Instead, explain what legal issue you are investigating and ask a clarifying question about it.
+3. CONVERSATIONAL PACE: Ask only 1 or 2 questions at a time. Never overwhelm the user with a list of questions.
+4. GATHER THE FOLLOWING CONTEXT (One by one over multiple turns):
+   - What exact corporate or legal structure is involved (e.g., limited liability company under CAMA, registered business name, unregistered partnership, or private individuals)?
+   - When did the events occur (specific timeline, dates, or frequency)?
+   - Are there written contracts, deeds, receipts, emails, or WhatsApp communications that prove the dispute?
+   - What specific outcome, remedy, or protection is the user trying to achieve?
 
-    // Dynamic Discovery: Query Groq for models available on this API key
-    let targetModel = "llama-3.1-8b-instant";
-    try {
-      const modelsResponse = await groq.models.list();
-      const activeIds: string[] = modelsResponse.data.map((m: any) => m.id);
-      console.log("[GROQ AVAILABLE MODELS]:", activeIds.join(", "));
+EXCEPTIONS (WHEN YOU ARE ALLOWED TO GIVE A FULL ANALYSIS):
+Only provide your final structured analysis (with Issues, Applicable Laws, Analysis, and Next Steps) if:
+- The user explicitly requests: "Give me the final analysis" OR "Provide your final opinion now."
+- OR you have successfully conducted a thorough back-and-forth interview of at least 3 to 4 turns and have collected all necessary facts.
 
-      // Order of preference among active models
-      const preferences = [
-        "llama-3.1-8b-instant",
-        "gemma2-9b-it",
-        "llama-3.2-3b-preview",
-        "llama-3.2-1b-preview",
-        "openai/gpt-oss-120b",
-        "openai/gpt-oss-20b",
-        "qwen/qwen3.8-27b"
-      ];
+Otherwise, your ONLY job is to acknowledge what they said, explain why more context is needed under ${jurisdiction}, and ask your follow-up questions.
 
-      const match = preferences.find((p) => activeIds.includes(p));
-      if (match) {
-        targetModel = match;
-      } else {
-        // Fallback to the first available chat model
-        const validTextModel = activeIds.find(
-          (id) => !id.includes("whisper") && !id.includes("guard") && !id.includes("embed")
-        );
-        if (validTextModel) targetModel = validTextModel;
-      }
-    } catch (discoveryErr: any) {
-      console.warn("[MODEL DISCOVERY WARNING]:", discoveryErr.message);
-      targetModel = "llama-3.1-8b-instant";
+***
+⚖️ *Lex AI provides legal information, not legal representation. Verify important legal advice and citations with a qualified lawyer before taking formal action.*
+
+${legalContext ? `\nRELEVANT STATUTORY REFERENCES:\n${legalContext}` : ""}`;
+
+    // Construct full conversation history
+    const chatMessages: any[] = [{ role: "system", content: systemPrompt }];
+
+    if (Array.isArray(messages) && messages.length > 0) {
+      messages.forEach((m: any) => {
+        if (m.content) {
+          chatMessages.push({
+            role: m.role === "assistant" ? "assistant" : "user",
+            content: m.content,
+          });
+        }
+      });
+    } else {
+      chatMessages.push({ role: "user", content: message });
     }
 
-    console.log(`[GROQ INFERENCE]: Executing query with model '${targetModel}'`);
+    // Active Groq models
+    const activeModels = [
+      "llama-3.1-8b-instant",
+      "gemma2-9b-it",
+      "llama-3.2-3b-preview"
+    ];
 
-    const completion = await groq.chat.completions.create({
-      model: targetModel,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: message },
-      ],
-      temperature: 0.2,
-      max_tokens: 1500,
-    });
+    let reply = "";
+    let lastError: any = null;
 
-    const reply = completion.choices[0]?.message?.content || "Unable to generate legal analysis at this time.";
+    for (const modelName of activeModels) {
+      try {
+        const completion = await groq.chat.completions.create({
+          model: modelName,
+          messages: chatMessages,
+          temperature: 0.1, // Set temperature very low to enforce strict adherence to the prompt rules
+          max_tokens: 1500,
+        });
 
-    // Save assistant reply to database
+        reply = completion.choices[0]?.message?.content || "";
+        if (reply) break;
+      } catch (err: any) {
+        lastError = err;
+      }
+    }
+
+    if (!reply) {
+      throw lastError || new Error("All AI inference models failed.");
+    }
+
+    // Save assistant reply to DB
     try {
       if (convId) {
         await supabase.from("messages").insert({
@@ -195,7 +215,7 @@ GUIDELINES:
         });
       }
     } catch (e) {
-      console.warn("Assistant response log skipped:", e);
+      console.warn("Assistant DB insert skipped:", e);
     }
 
     return new Response(
@@ -206,9 +226,9 @@ GUIDELINES:
       { headers: corsHeaders }
     );
   } catch (error: any) {
-    console.error("Chat Execution Error:", error);
+    console.error("Chat Error:", error);
     return new Response(
-      JSON.stringify({ error: `AI Engine Error: ${error.message || "Failed to process inquiry"}` }),
+      JSON.stringify({ error: `AI Assistant Error: ${error.message || "Failed to process inquiry"}` }),
       { status: 500, headers: corsHeaders }
     );
   }
