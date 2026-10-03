@@ -51,15 +51,25 @@ const AppContent = () => {
   const location = useLocation();
   const isChat = location.pathname === '/lex-ai';
   const isEmbed = location.pathname.includes('embed');
-  const hideChrome = isChat || isEmbed;
+  const isAppMode = isChat || isEmbed;
 
+  if (isAppMode) {
+    // App Mode: Fullscreen isolated viewport (Zero body scroll, only chat scrolls)
+    return (
+      <div className="fixed inset-0 h-[100dvh] w-full flex flex-col overflow-hidden bg-white dark:bg-[#171717]">
+        <AnimatedRoutes />
+      </div>
+    );
+  }
+
+  // Document Mode: Normal webpage scrolling with Navbar and Footer
   return (
-    <div className="h-[100dvh] h-screen w-full flex flex-col overflow-hidden bg-white dark:bg-[#171717]">
-      {!hideChrome && <Navbar />}
-      <main className="flex-1 flex flex-col min-h-0 w-full overflow-hidden">
+    <div className="min-h-screen min-h-[100dvh] w-full flex flex-col bg-white">
+      <Navbar />
+      <main className="flex-grow">
         <AnimatedRoutes />
       </main>
-      {!hideChrome && <Footer />}
+      <Footer />
     </div>
   );
 };
