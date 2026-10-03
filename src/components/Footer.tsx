@@ -52,9 +52,9 @@ const Footer = () => {
           <div>
             <h4 className="font-bold text-slate-900 mb-6">Platforms</h4>
             <ul className="space-y-4 text-sm text-slate-500">
-              <li><Link to="/ai-training" className="hover:text-blue-600 transition-colors">AI Training</Link></li>
-              <li><Link to="/bar-beyond" className="hover:text-blue-600 transition-colors">Bar & Beyond</Link></li>
-              <li><Link to="/naija-laws" className="hover:text-blue-600 transition-colors">Digital Naija Laws</Link></li>
+              <li><Link to="/lex-ai" className="hover:text-blue-600 transition-colors">Lex AI Chat</Link></li>
+              <li><Link to="/how-it-works" className="hover:text-blue-600 transition-colors">How It Works</Link></li>
+              <li><Link to="/about" className="hover:text-blue-600 transition-colors">About LexAI</Link></li>
             </ul>
           </div>
 
@@ -63,7 +63,7 @@ const Footer = () => {
             <ul className="space-y-4 text-sm text-slate-500">
               <li><Link to="/about" className="hover:text-blue-600 transition-colors">About Us</Link></li>
               <li><Link to="/contact" className="hover:text-blue-600 transition-colors">Contact</Link></li>
-              <li><Link to="/opportunities" className="hover:text-blue-600 transition-colors">Opportunities</Link></li>
+              <li><Link to="/how-it-works" className="hover:text-blue-600 transition-colors">How Lex AI Works</Link></li>
             </ul>
           </div>
 
