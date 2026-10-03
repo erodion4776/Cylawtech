@@ -12,6 +12,7 @@ import LexAI from './pages/LexAI';
 import LexAIStandalone from './pages/LexAIStandalone';
 import AdminSaaS from './pages/AdminSaaS';
 import PageTransition from './components/PageTransition';
+import CookieConsent from './components/CookieConsent'; // <-- IMPORT HERE
 
 const ScrollToTop = () => {
   const { pathname } = useLocation();
@@ -43,6 +44,7 @@ export default function App() {
     <Router>
       <ScrollToTop />
       <AppContent />
+      <CookieConsent /> {/* <-- MOUNT HERE */}
     </Router>
   );
 }
@@ -54,7 +56,6 @@ const AppContent = () => {
   const isAppMode = isChat || isEmbed;
 
   if (isAppMode) {
-    // App Mode: Fullscreen isolated viewport (Zero body scroll, only chat scrolls)
     return (
       <div className="fixed inset-0 h-[100dvh] w-full flex flex-col overflow-hidden bg-white dark:bg-[#171717]">
         <AnimatedRoutes />
@@ -62,7 +63,6 @@ const AppContent = () => {
     );
   }
 
-  // Document Mode: Normal webpage scrolling with Navbar and Footer
   return (
     <div className="min-h-screen min-h-[100dvh] w-full flex flex-col bg-white">
       <Navbar />
