@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Plus, Send, Loader2, MessageSquare, Trash2,
-  Scale, Menu, X, Home, Info, Mail, ShieldAlert,
+  Scale, Menu, X, Home, Info, Mail,
   Lock, Sparkles, ChevronDown, Copy, Check, Pencil
 } from 'lucide-react';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
@@ -175,7 +175,7 @@ const LexAI: React.FC = () => {
   const jurLabel = jurisdiction === 'nigeria' ? '🇳🇬 Nigerian Law' : '🇺🇸 US Law';
 
   return (
-    <div className="h-full w-full flex flex-col overflow-hidden bg-white dark:bg-[#171717] font-sans">
+    <div className="fixed inset-0 h-[100dvh] w-full flex flex-col overflow-hidden bg-white dark:bg-[#171717] font-sans">
 
       {/* ==================== PAYWALL MODAL ==================== */}
       <AnimatePresence>
@@ -243,8 +243,7 @@ const LexAI: React.FC = () => {
                 </button>
               </div>
 
-              {/* Drawer inner scrollable history */}
-              <div className="flex-1 overflow-y-auto px-2 py-3 space-y-0.5 overscroll-contain">
+              <div className="flex-grow overflow-y-auto px-2 py-3 space-y-0.5 overscroll-contain">
                 {conversations.length === 0 ? (
                   <p className="text-xs text-slate-600 text-center mt-10 px-4">No conversations yet.</p>
                 ) : (
@@ -282,13 +281,11 @@ const LexAI: React.FC = () => {
                 </div>
               </div>
 
-              {/* Drawer Links */}
               <nav className="p-3 border-t border-white/10 bg-[#0f0f0f] space-y-0.5">
                 {[
                   { to: '/', label: 'Home Page', icon: Home },
                   { to: '/about', label: 'About LexAI', icon: Info },
-                  { to: '/contact', label: 'Contact Support', icon: Mail },
-                  { to: '/saas-admin', label: 'Firm Portal', icon: ShieldAlert },
+                  { to: '/contact', label: 'Contact Support', icon: Mail }
                 ].map((link) => (
                   <Link
                     key={link.to}
@@ -378,8 +375,8 @@ const LexAI: React.FC = () => {
         <div className="fixed inset-0 z-30" onClick={() => setShowJurisdictionPicker(false)} />
       )}
 
-      {/* ==================== CHAT STREAM (ISOLATED SCROLL CONTAINER) ==================== */}
-      <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 py-4">
+      {/* ==================== MESSAGES & CHAT VIEW ==================== */}
+      <div className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain px-4 py-4">
         {messages.length === 0 ? (
           /* Landing Page State */
           <div className="min-h-full flex flex-col items-center justify-center text-center max-w-lg mx-auto py-6">
@@ -524,7 +521,7 @@ const LexAI: React.FC = () => {
         )}
       </div>
 
-      {/* ==================== PINNED INPUT DOCK ==================== */}
+      {/* ==================== BOTTOM INPUT BAR ==================== */}
       <div className="shrink-0 px-3 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-white dark:bg-[#171717] border-t border-slate-200/50 dark:border-white/5 z-30">
         <div className="max-w-3xl mx-auto">
           <div className="relative bg-slate-100 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl focus-within:border-slate-400 dark:focus-within:border-white/20 focus-within:bg-white dark:focus-within:bg-white/10 transition-all">
@@ -563,7 +560,8 @@ const LexAI: React.FC = () => {
             </button>
           </div>
 
-          <div className="flex flex-col sm:flex-row justify-between items-center px-1 mt-1.5 text-[10px] text-slate-400 dark:text-slate-500 gap-1 text-center sm:text-left leading-tight">
+          {/* Legal Disclaimer */}
+          <div className="flex flex-col sm:flex-row justify-between items-center px-1 mt-2 text-[10px] text-slate-400 dark:text-slate-500 gap-1 text-center sm:text-left leading-tight">
             <span>{messagesRemaining} free inquiries left today.</span>
             <span>Lex AI provides legal information, not legal representation. Verify important legal advice and citations with a qualified lawyer.</span>
           </div>
