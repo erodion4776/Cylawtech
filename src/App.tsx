@@ -11,7 +11,8 @@ import Legal from './pages/Legal';
 import LexAI from './pages/LexAI';
 import LexAIStandalone from './pages/LexAIStandalone';
 import AdminSaaS from './pages/AdminSaaS';
-import HowItWorks from './pages/HowItWorks'; // <-- IMPORT HERE
+import HowItWorks from './pages/HowItWorks';
+import Auth from './pages/Auth'; // <-- IMPORT HERE
 import PageTransition from './components/PageTransition';
 import CookieConsent from './components/CookieConsent';
 
@@ -29,10 +30,11 @@ const AnimatedRoutes = () => {
         <Routes location={location}>
           <Route path="/lex-ai-embed" element={<LexAIStandalone />} />
           <Route path="/lex-ai" element={<LexAI />} />
+          <Route path="/auth" element={<Auth />} /> {/* <-- ADD ROUTE HERE */}
           <Route path="/" element={<PageTransition><Home /></PageTransition>} />
           <Route path="/about" element={<PageTransition><About /></PageTransition>} />
           <Route path="/contact" element={<PageTransition><Contact /></PageTransition>} />
-          <Route path="/how-it-works" element={<PageTransition><HowItWorks /></PageTransition>} /> {/* <-- NEW ROUTE */}
+          <Route path="/how-it-works" element={<PageTransition><HowItWorks /></PageTransition>} />
           <Route path="/saas-admin" element={<PageTransition><AdminSaaS /></PageTransition>} />
           <Route path="/:type" element={<PageTransition><Legal /></PageTransition>} />
         </Routes>
@@ -55,7 +57,8 @@ const AppContent = () => {
   const location = useLocation();
   const isChat = location.pathname === '/lex-ai';
   const isEmbed = location.pathname.includes('embed');
-  const isAppMode = isChat || isEmbed;
+  const isAuth = location.pathname === '/auth'; // <-- HIDE CHROME ON AUTH PAGE
+  const isAppMode = isChat || isEmbed || isAuth;
 
   if (isAppMode) {
     return (
