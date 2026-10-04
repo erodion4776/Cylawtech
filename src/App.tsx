@@ -12,7 +12,8 @@ import LexAI from './pages/LexAI';
 import LexAIStandalone from './pages/LexAIStandalone';
 import AdminSaaS from './pages/AdminSaaS';
 import HowItWorks from './pages/HowItWorks';
-import Auth from './pages/Auth'; // <-- IMPORT HERE
+import Auth from './pages/Auth';
+import ProtectedRoute from './components/ProtectedRoute'; // <-- IMPORTED HERE
 import PageTransition from './components/PageTransition';
 import CookieConsent from './components/CookieConsent';
 
@@ -29,8 +30,18 @@ const AnimatedRoutes = () => {
       <motion.div key={location.pathname} className="flex-1 flex flex-col min-h-0 w-full">
         <Routes location={location}>
           <Route path="/lex-ai-embed" element={<LexAIStandalone />} />
-          <Route path="/lex-ai" element={<LexAI />} />
-          <Route path="/auth" element={<Auth />} /> {/* <-- ADD ROUTE HERE */}
+          
+          {/* PROTECTED ROUTE: Requires user login before accessing chat */}
+          <Route 
+            path="/lex-ai" 
+            element={
+              <ProtectedRoute>
+                <LexAI />
+              </ProtectedRoute>
+            } 
+          />
+          
+          <Route path="/auth" element={<Auth />} />
           <Route path="/" element={<PageTransition><Home /></PageTransition>} />
           <Route path="/about" element={<PageTransition><About /></PageTransition>} />
           <Route path="/contact" element={<PageTransition><Contact /></PageTransition>} />
@@ -57,7 +68,7 @@ const AppContent = () => {
   const location = useLocation();
   const isChat = location.pathname === '/lex-ai';
   const isEmbed = location.pathname.includes('embed');
-  const isAuth = location.pathname === '/auth'; // <-- HIDE CHROME ON AUTH PAGE
+  const isAuth = location.pathname === '/auth';
   const isAppMode = isChat || isEmbed || isAuth;
 
   if (isAppMode) {
