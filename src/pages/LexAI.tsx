@@ -3,25 +3,17 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   Plus, Send, Loader2, MessageSquare, Trash2,
   Scale, Menu, X, Home, Info, Mail,
-  Lock, Sparkles, ChevronDown, Copy, Check, Pencil
+  Lock, Sparkles, ChevronDown, Copy, Check, Pencil,
+  LogOut, User as UserIcon
 } from 'lucide-react';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import { cn } from '../lib/utils';
 import { Link, useNavigate } from 'react-router-dom';
+import { supabase } from '../lib/supabaseClient';
 import Markdown from 'react-markdown';
 
 const API_BASE = '/api/chat';
 const DAILY_LIMIT = 10;
-
-// Helper: Get or create persistent device ID stored in database
-function getOrCreateUserId(): string {
-  let uid = localStorage.getItem('lexai_device_user_id');
-  if (!uid) {
-    uid = 'usr_' + crypto.randomUUID().replace(/-/g, '');
-    localStorage.setItem('lexai_device_user_id', uid);
-  }
-  return uid;
-}
 
 interface Conversation {
   id: string;
@@ -40,18 +32,19 @@ interface Message {
 const LexAI: React.FC = () => {
   useDocumentTitle('Lex AI - Nigerian Legal AI Assistant');
   const navigate = useNavigate();
-  const userId = useRef(getOrCreateUserId()).current;
 
+  const [user, setUser] = useState<any>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConvId, setActiveConvId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [jurisdiction, setJurisdiction] = useState<'nigeria' | 'us'>('nigeria');
+  const [mode, setMode] = useState<'prep' | 'training' | 'practice'>('prep');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [showJurisdictionPicker, setShowJurisdictionPicker] = useState(false);
 
-  // Database-driven usage tracking
+  // Database usage tracking
   const [dbUsageCount, setDbUsageCount] = useState(0);
   const [showPaywall, setShowPaywall] = useState(false);
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
@@ -64,10 +57,18 @@ const LexAI: React.FC = () => {
   }, []);
 
   useEffect(() => { scrollToBottom(); }, [messages, isLoading, scrollToBottom]);
-  useEffect(() => { fetchConversations(); }, []);
 
-  // Fetch conversations and real usage from Supabase
-  const fetchConversations = async () => {
+  // Load authenticated user and their specific chat history
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (user) {
+        setUser(user);
+        fetchConversations(user.id);
+      }
+    });
+  }, []);
+
+  const fetchConversations = async (userId: string) => {
     try {
       const res = await fetch(`${API_BASE}?action=list&user_id=${userId}`);
       const data = await res.json();
@@ -112,7 +113,12 @@ const LexAI: React.FC = () => {
       body: JSON.stringify({ conversation_id: convId }),
     });
     if (activeConvId === convId) startNewChat();
-    fetchConversations();
+    if (user) fetchConversations(user.id);
+  };
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+    navigate('/auth');
   };
 
   const sendMessage = async (overrideMessage?: string) => {
@@ -140,7 +146,7 @@ const LexAI: React.FC = () => {
           messages: updatedMessages,
           conversation_id: activeConvId,
           jurisdiction: jurisdiction === 'nigeria' ? 'Nigerian Law' : 'US Federal Law',
-          user_id: userId, // Track public user in database
+          user_id: user?.id || 'authenticated_user',
         }),
       });
       const data = await res.json();
@@ -158,10 +164,10 @@ const LexAI: React.FC = () => {
       } else {
         setMessages(prev => [...prev, { role: 'assistant', content: data.response }]);
         if (data.conversation_id && !activeConvId) setActiveConvId(data.conversation_id);
-        fetchConversations();
+        if (user) fetchConversations(user.id);
       }
     } catch {
-      setMessages(prev => [...prev, { role: 'assistant', content: 'Unable to connect to Lex AI. Please check your internet connection.' }]);
+      setMessages(prev => [...prev, { role: 'assistant', content: 'Unable to connect to Lex AI. Please check your internet connection and try again.' }]);
     } finally {
       setIsLoading(false);
     }
@@ -207,7 +213,7 @@ const LexAI: React.FC = () => {
               </div>
               <h2 className="text-xl font-black text-slate-900 dark:text-white mb-2">Daily Inquiry Limit Reached</h2>
               <p className="text-slate-500 dark:text-slate-400 text-xs sm:text-sm mb-6 leading-relaxed">
-                You have reached your verified limit of {DAILY_LIMIT} free inquiries for today. Your daily limit will automatically reset tomorrow, or you can unlock unlimited queries.
+                You have reached your limit of {DAILY_LIMIT} free inquiries for today. Your limit resets automatically tomorrow.
               </p>
               <div className="grid grid-cols-2 gap-3 mb-6">
                 <div className="p-4 rounded-2xl bg-slate-50 dark:bg-[#252525] border border-slate-200 dark:border-slate-700 text-left">
@@ -254,10 +260,10 @@ const LexAI: React.FC = () => {
                 </button>
               </div>
 
-              {/* Database-synced Conversation History */}
+              {/* Authenticated Conversations History */}
               <div className="flex-1 overflow-y-auto px-2 py-3 space-y-0.5 overscroll-contain">
                 {conversations.length === 0 ? (
-                  <p className="text-xs text-slate-600 text-center mt-10 px-4">No conversations stored in database yet.</p>
+                  <p className="text-xs text-slate-600 text-center mt-10 px-4">No conversations stored yet.</p>
                 ) : (
                   conversations.map((conv) => (
                     <button
@@ -280,10 +286,10 @@ const LexAI: React.FC = () => {
                 )}
               </div>
 
-              {/* Verified Database Usage Meter */}
+              {/* Database Usage Meter */}
               <div className="mx-3 mb-2 p-3 bg-white/5 rounded-xl border border-white/5">
                 <div className="flex justify-between items-center mb-1.5 text-[10px] font-bold tracking-wider text-slate-400 uppercase">
-                  <span>Database Quota</span>
+                  <span>Daily Quota</span>
                   <span>{dbUsageCount} / {DAILY_LIMIT}</span>
                 </div>
                 <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
@@ -294,7 +300,15 @@ const LexAI: React.FC = () => {
                 </div>
               </div>
 
-              <nav className="p-3 border-t border-white/10 bg-[#0f0f0f] space-y-0.5">
+              {/* User Profile & Navigation */}
+              <nav className="p-3 border-t border-white/10 bg-[#0f0f0f] space-y-1">
+                {user && (
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-white/5 mb-2 text-xs text-slate-300">
+                    <UserIcon size={14} className="text-blue-400 shrink-0" />
+                    <span className="truncate flex-1 font-medium">{user.email}</span>
+                  </div>
+                )}
+
                 {[
                   { to: '/', label: 'Home Page', icon: Home },
                   { to: '/how-it-works', label: 'How It Works', icon: Sparkles },
@@ -305,12 +319,20 @@ const LexAI: React.FC = () => {
                     key={link.to}
                     to={link.to}
                     onClick={() => setDrawerOpen(false)}
-                    className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold text-slate-400 hover:bg-white/5 hover:text-slate-100 transition-all active:scale-[0.98]"
+                    className="flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:bg-white/5 hover:text-slate-100 transition-all active:scale-[0.98]"
                   >
                     <link.icon size={14} className="shrink-0 opacity-60" />
                     <span>{link.label}</span>
                   </Link>
                 ))}
+
+                <button
+                  onClick={handleSignOut}
+                  className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold text-rose-400 hover:bg-rose-500/10 transition-all bg-transparent border-0 cursor-pointer"
+                >
+                  <LogOut size={14} className="shrink-0" />
+                  <span>Sign Out</span>
+                </button>
               </nav>
             </motion.aside>
           </>
@@ -389,7 +411,7 @@ const LexAI: React.FC = () => {
         <div className="fixed inset-0 z-30" onClick={() => setShowJurisdictionPicker(false)} />
       )}
 
-      {/* CHAT MESSAGES STREAM */}
+      {/* MESSAGES STREAM */}
       <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 py-4">
         {messages.length === 0 ? (
           <div className="min-h-full flex flex-col items-center justify-center text-center max-w-lg mx-auto py-6">
@@ -572,7 +594,7 @@ const LexAI: React.FC = () => {
           </div>
 
           <div className="flex flex-col sm:flex-row justify-between items-center px-1 mt-2 text-[10px] text-slate-400 dark:text-slate-500 gap-1 text-center sm:text-left leading-tight">
-            <span>{messagesRemaining} verified inquiries remaining today.</span>
+            <span>{messagesRemaining} verified inquiries left today.</span>
             <span>Lex AI provides legal information, not legal representation. Verify important legal advice with a qualified lawyer.</span>
           </div>
         </div>
