@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Menu, X } from 'lucide-react';
+import { Menu, X, ArrowRight } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { supabase } from '../lib/supabaseClient';
 import { cn } from '../lib/utils';
 
 const Navbar = () => {
   const [isOpen, setIsOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const location = useLocation();
 
   useEffect(() => {
@@ -14,7 +16,20 @@ const Navbar = () => {
       setScrolled(window.scrollY > 20);
     };
     window.addEventListener('scroll', handleScroll);
-    return () => window.removeEventListener('scroll', handleScroll);
+
+    // Monitor Auth State
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setIsAuthenticated(!!session);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setIsAuthenticated(!!session);
+    });
+
+    return () => {
+      window.removeEventListener('scroll', handleScroll);
+      subscription.unsubscribe();
+    };
   }, []);
 
   const navLinks = [
@@ -67,15 +82,15 @@ const Navbar = () => {
               />
             </Link>
           ))}
-          <motion.div
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.97 }}
-          >
+          
+          {/* Dynamic Sign In / Go to Chat Button */}
+          <motion.div whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.98 }}>
             <Link
-              to="/contact"
-              className="bg-slate-900 text-white px-5 py-2.5 rounded-full text-sm font-semibold hover:bg-slate-800 transition-all shadow-md hover:shadow-xl"
+              to={isAuthenticated ? "/lex-ai" : "/auth"}
+              className="bg-slate-900 hover:bg-slate-800 text-white px-5 py-2.5 rounded-full text-xs font-bold transition-all shadow-md flex items-center gap-1.5"
             >
-              Join the Waitlist
+              <span>{isAuthenticated ? 'Go to Workspace' : 'Sign In'}</span>
+              <ArrowRight size={13} />
             </Link>
           </motion.div>
         </div>
@@ -83,14 +98,14 @@ const Navbar = () => {
         {/* Mobile Menu Toggle */}
         <motion.button
           whileTap={{ scale: 0.9 }}
-          className="md:hidden text-slate-900 p-2"
+          className="md:hidden text-slate-900 p-2 bg-transparent border-0 cursor-pointer"
           onClick={() => setIsOpen(!isOpen)}
         >
           {isOpen ? <X size={24} /> : <Menu size={24} />}
         </motion.button>
       </div>
 
-      {/* Mobile Nav */}
+      {/* Mobile Nav Drawer */}
       <AnimatePresence>
         {isOpen && (
           <motion.div 
@@ -101,7 +116,7 @@ const Navbar = () => {
             className="md:hidden fixed inset-y-0 right-0 w-full max-w-xs bg-white shadow-2xl z-[60] p-8 flex flex-col gap-6"
           >
             <div className="flex justify-end">
-              <button onClick={() => setIsOpen(false)} className="p-2 text-slate-500">
+              <button onClick={() => setIsOpen(false)} className="p-2 text-slate-500 bg-transparent border-0 cursor-pointer">
                 <X size={24} />
               </button>
             </div>
@@ -130,11 +145,11 @@ const Navbar = () => {
               transition={{ delay: 0.6 }}
             >
               <Link
-                to="/contact"
+                to={isAuthenticated ? "/lex-ai" : "/auth"}
                 className="bg-slate-900 text-white px-6 py-4 rounded-2xl text-center font-bold mt-4 block shadow-lg"
                 onClick={() => setIsOpen(false)}
               >
-                Join the Waitlist
+                {isAuthenticated ? 'Go to Workspace' : 'Sign In'}
               </Link>
             </motion.div>
           </motion.div>
