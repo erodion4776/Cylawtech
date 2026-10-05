@@ -244,7 +244,17 @@ const LexAI: React.FC = () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       audioChunksRef.current = [];
-      const mediaRecorder = new MediaRecorder(stream);
+
+      let mimeType = 'audio/webm';
+      if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+        mimeType = 'audio/webm;codecs=opus';
+      } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
+        mimeType = 'audio/mp4';
+      } else if (MediaRecorder.isTypeSupported('audio/aac')) {
+        mimeType = 'audio/aac';
+      }
+
+      const mediaRecorder = new MediaRecorder(stream, { mimeType });
       mediaRecorderRef.current = mediaRecorder;
 
       mediaRecorder.ondataavailable = (event) => {
@@ -254,16 +264,17 @@ const LexAI: React.FC = () => {
       };
 
       mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: mediaRecorder.mimeType || 'audio/webm' });
+        const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
         const base64 = await blobToBase64(audioBlob);
         
-        // Stop all microphone audio tracks
         stream.getTracks().forEach((track) => track.stop());
 
+        const ext = mimeType.includes('mp4') || mimeType.includes('aac') ? 'm4a' : 'webm';
+
         setAttachment({
-          name: `Voice Note (${recordingSeconds}s)`,
+          name: `voicenote.${ext}`,
           type: 'audio',
-          mimeType: mediaRecorder.mimeType || 'audio/webm',
+          mimeType: mimeType,
           base64: base64,
         });
 
@@ -278,7 +289,7 @@ const LexAI: React.FC = () => {
 
       recordingTimerRef.current = setInterval(() => {
         setRecordingSeconds((prev) => {
-          if (prev >= 120) { // Max 2 minutes
+          if (prev >= 120) {
             stopVoiceRecording();
             return 120;
           }
@@ -287,7 +298,7 @@ const LexAI: React.FC = () => {
       }, 1000);
     } catch (err: any) {
       console.error("Microphone access error:", err);
-      alert("Microphone access is required to record voice notes. Please allow microphone permissions in your browser.");
+      alert("Microphone access is required to record voice notes. Please enable microphone permissions in your browser.");
     }
   };
 
@@ -322,7 +333,6 @@ const LexAI: React.FC = () => {
 
     try {
       if (file.type.startsWith('audio/') || file.name.match(/\.(mp3|m4a|wav|ogg|aac|webm)$/i)) {
-        // Audio File / Voice Note
         const base64 = await blobToBase64(file);
         setAttachment({
           name: file.name,
@@ -331,7 +341,6 @@ const LexAI: React.FC = () => {
           base64: base64,
         });
       } else if (file.type.startsWith('image/')) {
-        // Image for Groq Vision
         const { base64, mimeType } = await processImageFile(file);
         setAttachment({
           name: file.name,
@@ -340,7 +349,6 @@ const LexAI: React.FC = () => {
           base64,
         });
       } else if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
-        // PDF Text Extractor
         const extractedText = await extractPdfText(file);
         setAttachment({
           name: file.name,
@@ -349,7 +357,6 @@ const LexAI: React.FC = () => {
           extractedText,
         });
       } else {
-        // Plain Text / Doc
         const text = await file.text();
         setAttachment({
           name: file.name,
@@ -383,11 +390,12 @@ const LexAI: React.FC = () => {
 
     let displayMsg = textToSend;
     if (currentAttachment && currentAttachment.type === 'audio') {
-      displayMsg = `🎙️ *Voice Note:* "${currentAttachment.name}"${textToSend ? `\n\n${textToSend}` : ''}`;
+      displayMsg = `🎙️ *Transcribing voice note...*${textToSend ? `\n\n${textToSend}` : ''}`;
     } else if (currentAttachment) {
       displayMsg = `${textToSend}\n\n📎 *Attached: ${currentAttachment.name}*`;
     }
 
+    const userMessageIndex = messages.length;
     const updatedMessages: Message[] = [...messages, { role: 'user', content: displayMsg }];
     setMessages(updatedMessages);
     setIsLoading(true);
@@ -409,6 +417,19 @@ const LexAI: React.FC = () => {
 
       if (data.paywall) setShowPaywall(true);
       if (data.usage) setDbUsageCount(data.usage.count);
+
+      if (data.transcription) {
+        setMessages((prev) => {
+          const clone = [...prev];
+          if (clone[userMessageIndex]) {
+            clone[userMessageIndex] = {
+              ...clone[userMessageIndex],
+              content: `🎙️ *Voice Note:* "${data.transcription}"${textToSend ? `\n\n${textToSend}` : ''}`,
+            };
+          }
+          return clone;
+        });
+      }
 
       if (data.error && !data.response) {
         setMessages(prev => [...prev, { role: 'assistant', content: data.error }]);
