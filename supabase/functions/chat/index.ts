@@ -65,7 +65,7 @@ serve(async (req) => {
     const action = url.searchParams.get("action") || "send";
     const headerUserId = req.headers.get("x-user-id");
 
-    // Action: List
+    // 1. List conversations
     if (action === "list") {
       const targetUser = url.searchParams.get("user_id") || headerUserId || "public_user";
       const { data } = await supabase
@@ -94,7 +94,7 @@ serve(async (req) => {
       );
     }
 
-    // Action: History
+    // 2. History
     if (action === "history") {
       const { conversation_id } = await req.json();
       const { data } = await supabase
@@ -105,14 +105,14 @@ serve(async (req) => {
       return new Response(JSON.stringify({ messages: data || [] }), { headers: corsHeaders });
     }
 
-    // Action: Delete
+    // 3. Delete
     if (action === "delete") {
       const { conversation_id } = await req.json();
       await supabase.from("conversations").delete().eq("id", conversation_id);
       return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
     }
 
-    // Action: Send Message
+    // 4. Process Chat Message
     const body = await req.json();
     const {
       message,
@@ -154,7 +154,7 @@ serve(async (req) => {
       );
     }
 
-    // Increment Daily Usage
+    // Increment Usage
     await supabase.from("user_daily_usage").upsert({
       user_id: activeUserId,
       usage_date: today,
@@ -162,7 +162,7 @@ serve(async (req) => {
       updated_at: new Date().toISOString(),
     }, { onConflict: "user_id, usage_date" });
 
-    // Web Browsing Extraction
+    // Web browsing helper
     let webContext = "";
     const urlMatches = message.match(/https?:\/\/[^\s]+/g);
     if (urlMatches && urlMatches.length > 0) {
@@ -173,7 +173,7 @@ serve(async (req) => {
       }
     }
 
-    // Manage Conversation ID
+    // Conversation management
     let convId = conversation_id;
     const initialText = message || `Review attached ${attachment?.name || "document"}`;
     if (!convId) {
@@ -203,7 +203,7 @@ serve(async (req) => {
       });
     }
 
-    // Search Knowledge Library (RAG)
+    // Search knowledge library (RAG)
     let legalContext = "";
     try {
       const { data: matches } = await supabase.rpc("search_statutory_library", {
@@ -216,40 +216,49 @@ serve(async (req) => {
       }
     } catch { /* silent */ }
 
-    // STRICT SYSTEM PROMPT: Dynamic Intake with Citations & Sources Enforced
-    const systemPrompt = `You are Lex AI, a senior legal practitioner and multijurisdictional legal intelligence assistant.
+    // Check if this is the start of a chat or a follow-up turn
+    const isFollowUpTurn = Array.isArray(messages) && messages.length >= 2;
 
-JURISDICTION: ${jurisdiction}
+    // SYSTEM PROMPT: SINGLE-INTAKE PROTOCOL (NO ENDLESS LOOPS)
+    const systemPrompt = `You are Lex AI, a senior legal counsel and legal assistant specializing in ${jurisdiction}.
 
-YOUR INTENSITY RULES:
-You conduct structured legal intakes. Never provide a final legal conclusion or structured analysis in your first turn if key factual details are missing. Always guide the client by asking 1-2 focused follow-up questions first.
+OPERATIONAL RULES:
 
-THE INTAKE PROTOCOL:
-- If critical details (CAMA corporate structure, exact dates, monetary values, written agreements) are unknown, politely explain why they matter and ask your clarifying questions.
-- Once all facts are gathered, transition into a complete, formal legal analysis.
+1. DRAFTING & DIRECT QUESTIONS:
+If the user asks to draft a contract, review an attachment/text, or asks an informational question (e.g., "Draft an NDA", "Explain tenancy notice", "What is Section 305 CAMA?"), answer and draft IMMEDIATELY without asking unnecessary questions.
 
-STRICT CITATION DIRECTIVE (For Final Analysis):
-When delivering a full legal analysis, you MUST provide explicit citations:
-1. INLINE CITATIONS: For every statutory rule or precedent you mention, cite the exact act and section directly within the sentence (e.g., "...under Section 305 of the Companies and Allied Matters Act (CAMA) 2020..." or "...as established in the US Uniform Commercial Code, Article 2-201...").
-2. SOURCES CITED SECTION: At the very bottom of your final analysis, list a structured directory of all sources consulted. This must include:
-   - Specific Acts or Constitutions (e.g. 1999 Constitution of Nigeria, Section 36)
-   - Judicial precedents/Case Law citations
-   - Uploaded PDF/Image document names (if provided)
-   - Live web links analyzed (if provided)
+2. NEW COMPLEX LEGAL DISPUTES (FIRST MESSAGE ONLY):
+If the user describes a fresh legal problem or dispute that requires specific facts:
+- Acknowledge their situation with professional empathy.
+- Give a brief 2-sentence initial legal overview.
+- List ALL the questions you need in ONE single clear, numbered list (maximum 3-4 questions: parties involved, timeline/dates, written documents/evidence, and desired outcome).
+- Inform the user: "Once you share these details, I will provide your complete legal analysis and action plan."
+- NEVER ask questions more than once!
 
-STRUCTURE FOR FINAL LEGAL ANALYSIS:
+3. SECOND TURN / AFTER USER REPLIES (PROCEED IMMEDIATELY):
+${isFollowUpTurn ? "CRITICAL: The user is now providing details. YOU MUST PROCEED IMMEDIATELY TO THE COMPLETE LEGAL ANALYSIS. DO NOT ASK ANY MORE QUESTIONS. Work with the facts provided and state any necessary assumptions." : "Once the user provides details on the next turn, proceed directly to the full analysis without asking another round of questions."}
+
+STRUCTURE OF FULL LEGAL ANALYSIS (When delivering final analysis):
 ### 1. LEGAL ISSUES IDENTIFIED
-### 2. APPLICABLE LAWS & STATUTORY RULES (WITH CITATIONS)
-### 3. LEGAL ANALYSIS & DOCUMENT AUDIT
+[Concise breakdown of the core legal issues]
+
+### 2. APPLICABLE LAWS & STATUTES (WITH CITATIONS)
+[Cite exact sections from relevant Acts, e.g., CAMA 2020 Sec. 305, 1999 Constitution, or relevant case precedents under ${jurisdiction}]
+
+### 3. LEGAL ANALYSIS
+[Step-by-step application of the legal rules to the user's specific facts]
+
 ### 4. STRATEGIC OPTIONS & RECOMMENDED NEXT STEPS
+[Practical, actionable steps: demand letter, mediation, regulatory report, court filing, etc.]
+
 ### 5. SOURCES CITED
-- [List exact acts, sections, judgments, and provided references here]
+- [List exact Acts, Sections, Case Law, and documents consulted]
 
 ***
-⚖️ *Lex AI provides legal information, not legal representation. Verify important legal advice and citations with a qualified lawyer.*
+⚖️ *Lex AI provides legal information, not legal representation. Verify important legal advice and citations with a qualified lawyer before taking formal action.*
 
 ${webContext}
-${attachment?.extractedText ? `\n\n[EXTRACTED ATTACHMENT TEXT (${attachment.name})]:\n${attachment.extractedText}\n` : ""}
+${attachment?.extractedText ? `\n\n[ATTACHED DOCUMENT CONTENT (${attachment.name})]:\n${attachment.extractedText}\n` : ""}
 ${legalContext ? `\nRELEVANT STATUTORY REFERENCES:\n${legalContext}` : ""}`;
 
     const chatMessages: any[] = [{ role: "system", content: systemPrompt }];
@@ -263,6 +272,8 @@ ${legalContext ? `\nRELEVANT STATUTORY REFERENCES:\n${legalContext}` : ""}`;
           });
         }
       });
+    } else {
+      chatMessages.push({ role: "user", content: message });
     }
 
     const isImage = attachment && attachment.type === "image" && attachment.base64;
@@ -281,11 +292,6 @@ ${legalContext ? `\nRELEVANT STATUTORY REFERENCES:\n${legalContext}` : ""}`;
           },
         ],
       });
-    } else {
-      chatMessages.push({
-        role: "user",
-        content: message || `Please review the attached document: ${attachment?.name || ""}`,
-      });
     }
 
     const candidateModels = isImage 
@@ -300,8 +306,8 @@ ${legalContext ? `\nRELEVANT STATUTORY REFERENCES:\n${legalContext}` : ""}`;
         const completion = await groq.chat.completions.create({
           model: modelName,
           messages: chatMessages,
-          temperature: 0.2, // Low temperature enforces strict citation guidelines
-          max_tokens: 2000,
+          temperature: 0.2,
+          max_tokens: 2200,
         });
 
         reply = completion.choices[0]?.message?.content || "";
@@ -316,7 +322,7 @@ ${legalContext ? `\nRELEVANT STATUTORY REFERENCES:\n${legalContext}` : ""}`;
       throw lastError || new Error("All AI inference models failed.");
     }
 
-    // Save assistant reply to DB
+    // Save assistant reply in DB
     if (convId) {
       await supabase.from("messages").insert({
         conversation_id: convId,
