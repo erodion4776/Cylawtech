@@ -7,7 +7,7 @@
   targetPort = 5173
   port = 8888
 
-# Connect frontend to your live Supabase Edge Functions
+# Route all chat requests directly to Supabase Edge Functions
 [[redirects]]
   from = "/api/chat"
   to = "https://utevbbyriqhnxhoipljv.supabase.co/functions/v1/chat"
@@ -32,7 +32,6 @@
   to = "/index.html"
   status = 200
 
-# Standalone embed headers
 [[headers]]
   for = "/lex-ai-embed"
   [headers.values]
