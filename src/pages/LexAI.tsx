@@ -12,12 +12,28 @@ import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import Markdown from 'react-markdown';
 
-// Load PDF.js worker from CDN for browser text extraction
-import * as pdfjsLib from 'pdfjs-dist';
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
-
 const API_BASE = '/api/chat';
 const DAILY_LIMIT = 10;
+
+// Dynamic runtime PDF extractor (Zero build-time bundle dependencies)
+async function extractTextFromPdf(file: File): Promise<string> {
+  // @ts-ignore
+  const pdfjsLib = await import(/* @vite-ignore */ 'https://esm.sh/pdfjs-dist@3.11.174');
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://esm.sh/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+  
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  let fullText = '';
+
+  const maxPages = Math.min(pdf.numPages, 15);
+  for (let i = 1; i <= maxPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    const pageText = content.items.map((item: any) => item.str).join(' ');
+    fullText += `\n--- [Page ${i}] ---\n` + pageText;
+  }
+  return fullText.trim();
+}
 
 interface AttachmentData {
   name: string;
@@ -136,7 +152,6 @@ const LexAI: React.FC = () => {
     navigate('/auth');
   };
 
-  // Handle File Upload (PDFs, Images, Documents)
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -150,7 +165,6 @@ const LexAI: React.FC = () => {
 
     try {
       if (file.type.startsWith('image/')) {
-        // Read Image as Base64 for Groq Vision AI
         const reader = new FileReader();
         reader.onload = () => {
           const base64String = (reader.result as string).split(',')[1];
@@ -164,28 +178,15 @@ const LexAI: React.FC = () => {
         };
         reader.readAsDataURL(file);
       } else if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
-        // Extract text directly from PDF
-        const arrayBuffer = await file.arrayBuffer();
-        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-        let fullText = '';
-
-        const maxPages = Math.min(pdf.numPages, 15); // Parse up to 15 pages
-        for (let i = 1; i <= maxPages; i++) {
-          const page = await pdf.getPage(i);
-          const content = await page.getTextContent();
-          const pageText = content.items.map((item: any) => item.str).join(' ');
-          fullText += `\n--- [Page ${i}] ---\n` + pageText;
-        }
-
+        const extractedText = await extractTextFromPdf(file);
         setAttachment({
           name: file.name,
           type: 'pdf',
-          mimeType: file.type,
-          extractedText: fullText.trim(),
+          mimeType: file.type || 'application/pdf',
+          extractedText,
         });
         setIsProcessingFile(false);
       } else {
-        // Read plain text / doc files
         const text = await file.text();
         setAttachment({
           name: file.name,
@@ -197,7 +198,7 @@ const LexAI: React.FC = () => {
       }
     } catch (err: any) {
       console.error("File processing error:", err);
-      alert("Could not process this document. Please try a different PDF or image.");
+      alert("Could not extract text from this document. Please try a different PDF or image.");
       setIsProcessingFile(false);
     }
   };
@@ -263,7 +264,6 @@ const LexAI: React.FC = () => {
   };
 
   const handleEdit = (text: string) => {
-    // Strip attachment badge note if editing
     const cleanText = text.split('\n\n📎')[0];
     setInput(cleanText);
     if (inputRef.current) {
