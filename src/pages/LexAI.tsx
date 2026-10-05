@@ -15,24 +15,108 @@ import Markdown from 'react-markdown';
 const API_BASE = '/api/chat';
 const DAILY_LIMIT = 10;
 
-// Dynamic runtime PDF extractor (Zero build-time bundle dependencies)
-async function extractTextFromPdf(file: File): Promise<string> {
-  // @ts-ignore
-  const pdfjsLib = await import(/* @vite-ignore */ 'https://esm.sh/pdfjs-dist@3.11.174');
-  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://esm.sh/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
-  
-  const arrayBuffer = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-  let fullText = '';
+// ============================================================================
+// BULLETPROOF DOCUMENT & IMAGE EXTRACTOR (Bypasses Browser CORS/Worker Blocks)
+// ============================================================================
 
-  const maxPages = Math.min(pdf.numPages, 15);
+// 1. Safe Cross-Origin PDF Text Extractor
+async function extractPdfText(file: File): Promise<string> {
+  // Dynamically load PDF.js script into document if not already loaded
+  if (!(window as any).pdfjsLib) {
+    await new Promise<void>((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+      script.onload = () => resolve();
+      script.onerror = () => reject(new Error('Failed to load PDF reader. Check internet connection.'));
+      document.head.appendChild(script);
+    });
+  }
+
+  const pdfjs = (window as any).pdfjsLib;
+
+  // Bypass Cross-Origin Security Restrictions via Inline Blob Worker
+  if (!pdfjs.GlobalWorkerOptions.workerSrc) {
+    try {
+      const workerBlob = new Blob(
+        [`importScripts('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js');`],
+        { type: 'application/javascript' }
+      );
+      pdfjs.GlobalWorkerOptions.workerSrc = URL.createObjectURL(workerBlob);
+    } catch {
+      // Fallback: Continue without explicit workerSrc
+    }
+  }
+
+  const arrayBuffer = await file.arrayBuffer();
+  const loadingTask = pdfjs.getDocument({
+    data: new Uint8Array(arrayBuffer),
+    useWorkerFetch: false,
+    isEvalSupported: false,
+  });
+
+  const pdf = await loadingTask.promise;
+  let fullText = '';
+  const maxPages = Math.min(pdf.numPages, 20); // Extract up to 20 pages
+
   for (let i = 1; i <= maxPages; i++) {
     const page = await pdf.getPage(i);
-    const content = await page.getTextContent();
-    const pageText = content.items.map((item: any) => item.str).join(' ');
-    fullText += `\n--- [Page ${i}] ---\n` + pageText;
+    const textContent = await page.getTextContent();
+    const pageText = textContent.items
+      .map((item: any) => item.str)
+      .join(' ')
+      .trim();
+
+    if (pageText) {
+      fullText += `\n--- [Page ${i} of ${pdf.numPages}] ---\n` + pageText;
+    }
   }
+
+  if (!fullText.trim()) {
+    throw new Error(
+      "This PDF contains scanned image pages without selectable text. Please take a photo/screenshot of the pages and attach it as an Image for visual review."
+    );
+  }
+
   return fullText.trim();
+}
+
+// 2. High-Performance Smartphone Image Resizer & Base64 Encoder
+async function processImageFile(file: File): Promise<{ base64: string; mimeType: string }> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+        const maxDimension = 1600; // Optimal resolution for Groq Vision AI
+
+        if (width > maxDimension || height > maxDimension) {
+          if (width > height) {
+            height = Math.round((height * maxDimension) / width);
+            width = maxDimension;
+          } else {
+            width = Math.round((width * maxDimension) / height);
+            height = maxDimension;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx?.drawImage(img, 0, 0, width, height);
+
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        const base64 = dataUrl.split(',')[1];
+        resolve({ base64, mimeType: 'image/jpeg' });
+      };
+      img.onerror = () => reject(new Error('Invalid image file.'));
+      img.src = e.target?.result as string;
+    };
+    reader.onerror = () => reject(new Error('Failed to read file from device.'));
+    reader.readAsDataURL(file);
+  });
 }
 
 interface AttachmentData {
@@ -152,12 +236,13 @@ const LexAI: React.FC = () => {
     navigate('/auth');
   };
 
+  // Safe file uploader handler
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (file.size > 10 * 1024 * 1024) {
-      alert("Please upload a file smaller than 10MB.");
+    if (file.size > 15 * 1024 * 1024) {
+      alert("Please upload a file smaller than 15MB.");
       return;
     }
 
@@ -165,28 +250,25 @@ const LexAI: React.FC = () => {
 
     try {
       if (file.type.startsWith('image/')) {
-        const reader = new FileReader();
-        reader.onload = () => {
-          const base64String = (reader.result as string).split(',')[1];
-          setAttachment({
-            name: file.name,
-            type: 'image',
-            mimeType: file.type,
-            base64: base64String,
-          });
-          setIsProcessingFile(false);
-        };
-        reader.readAsDataURL(file);
-      } else if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
-        const extractedText = await extractTextFromPdf(file);
+        // Image Processing for Vision AI
+        const { base64, mimeType } = await processImageFile(file);
+        setAttachment({
+          name: file.name,
+          type: 'image',
+          mimeType,
+          base64,
+        });
+      } else if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+        // PDF Extraction
+        const extractedText = await extractPdfText(file);
         setAttachment({
           name: file.name,
           type: 'pdf',
-          mimeType: file.type || 'application/pdf',
+          mimeType: 'application/pdf',
           extractedText,
         });
-        setIsProcessingFile(false);
       } else {
+        // Text / Markdown / Document files
         const text = await file.text();
         setAttachment({
           name: file.name,
@@ -194,12 +276,13 @@ const LexAI: React.FC = () => {
           mimeType: file.type || 'text/plain',
           extractedText: text.substring(0, 15000),
         });
-        setIsProcessingFile(false);
       }
     } catch (err: any) {
-      console.error("File processing error:", err);
-      alert("Could not extract text from this document. Please try a different PDF or image.");
+      console.error("Document parser error:", err);
+      alert(err.message || "Failed to parse document. Please check the file format.");
+    } finally {
       setIsProcessingFile(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
 
