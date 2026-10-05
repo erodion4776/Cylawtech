@@ -4,7 +4,8 @@ import {
   Plus, Send, Loader2, MessageSquare, Trash2,
   Scale, Menu, X, Home, Info, Mail,
   Lock, Sparkles, ChevronDown, Copy, Check, Pencil,
-  LogOut, User as UserIcon, Paperclip, FileText, Image as ImageIcon
+  LogOut, User as UserIcon, Paperclip, FileText, Image as ImageIcon,
+  Mic, Square, Volume2
 } from 'lucide-react';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import { cn } from '../lib/utils';
@@ -15,13 +16,8 @@ import Markdown from 'react-markdown';
 const API_BASE = '/api/chat';
 const DAILY_LIMIT = 10;
 
-// ============================================================================
-// BULLETPROOF DOCUMENT & IMAGE EXTRACTOR (Bypasses Browser CORS/Worker Blocks)
-// ============================================================================
-
-// 1. Safe Cross-Origin PDF Text Extractor
+// Safe Cross-Origin PDF Text Extractor
 async function extractPdfText(file: File): Promise<string> {
-  // Dynamically load PDF.js script into document if not already loaded
   if (!(window as any).pdfjsLib) {
     await new Promise<void>((resolve, reject) => {
       const script = document.createElement('script');
@@ -33,8 +29,6 @@ async function extractPdfText(file: File): Promise<string> {
   }
 
   const pdfjs = (window as any).pdfjsLib;
-
-  // Bypass Cross-Origin Security Restrictions via Inline Blob Worker
   if (!pdfjs.GlobalWorkerOptions.workerSrc) {
     try {
       const workerBlob = new Blob(
@@ -42,9 +36,7 @@ async function extractPdfText(file: File): Promise<string> {
         { type: 'application/javascript' }
       );
       pdfjs.GlobalWorkerOptions.workerSrc = URL.createObjectURL(workerBlob);
-    } catch {
-      // Fallback: Continue without explicit workerSrc
-    }
+    } catch { /* fallback */ }
   }
 
   const arrayBuffer = await file.arrayBuffer();
@@ -56,31 +48,23 @@ async function extractPdfText(file: File): Promise<string> {
 
   const pdf = await loadingTask.promise;
   let fullText = '';
-  const maxPages = Math.min(pdf.numPages, 20); // Extract up to 20 pages
+  const maxPages = Math.min(pdf.numPages, 20);
 
   for (let i = 1; i <= maxPages; i++) {
     const page = await pdf.getPage(i);
     const textContent = await page.getTextContent();
-    const pageText = textContent.items
-      .map((item: any) => item.str)
-      .join(' ')
-      .trim();
-
-    if (pageText) {
-      fullText += `\n--- [Page ${i} of ${pdf.numPages}] ---\n` + pageText;
-    }
+    const pageText = textContent.items.map((item: any) => item.str).join(' ').trim();
+    if (pageText) fullText += `\n--- [Page ${i} of ${pdf.numPages}] ---\n` + pageText;
   }
 
   if (!fullText.trim()) {
-    throw new Error(
-      "This PDF contains scanned image pages without selectable text. Please take a photo/screenshot of the pages and attach it as an Image for visual review."
-    );
+    throw new Error("This PDF contains scanned images without selectable text. Please upload photos of the pages as images for visual review.");
   }
 
   return fullText.trim();
 }
 
-// 2. High-Performance Smartphone Image Resizer & Base64 Encoder
+// Image Resizer for Vision AI
 async function processImageFile(file: File): Promise<{ base64: string; mimeType: string }> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -90,7 +74,7 @@ async function processImageFile(file: File): Promise<{ base64: string; mimeType:
         const canvas = document.createElement('canvas');
         let width = img.width;
         let height = img.height;
-        const maxDimension = 1600; // Optimal resolution for Groq Vision AI
+        const maxDimension = 1600;
 
         if (width > maxDimension || height > maxDimension) {
           if (width > height) {
@@ -108,20 +92,32 @@ async function processImageFile(file: File): Promise<{ base64: string; mimeType:
         ctx?.drawImage(img, 0, 0, width, height);
 
         const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
-        const base64 = dataUrl.split(',')[1];
-        resolve({ base64, mimeType: 'image/jpeg' });
+        resolve({ base64: dataUrl.split(',')[1], mimeType: 'image/jpeg' });
       };
       img.onerror = () => reject(new Error('Invalid image file.'));
       img.src = e.target?.result as string;
     };
-    reader.onerror = () => reject(new Error('Failed to read file from device.'));
+    reader.onerror = () => reject(new Error('Failed to read file.'));
     reader.readAsDataURL(file);
+  });
+}
+
+// Convert audio blob to base64
+async function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const base64 = (reader.result as string).split(',')[1];
+      resolve(base64);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
   });
 }
 
 interface AttachmentData {
   name: string;
-  type: 'image' | 'pdf' | 'text';
+  type: 'image' | 'pdf' | 'text' | 'audio';
   mimeType: string;
   base64?: string;
   extractedText?: string;
@@ -160,6 +156,13 @@ const LexAI: React.FC = () => {
   const [attachment, setAttachment] = useState<AttachmentData | null>(null);
   const [isProcessingFile, setIsProcessingFile] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Live Voice Recording State
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const recordingTimerRef = useRef<any>(null);
 
   // Database usage tracking
   const [dbUsageCount, setDbUsageCount] = useState(0);
@@ -236,21 +239,99 @@ const LexAI: React.FC = () => {
     navigate('/auth');
   };
 
-  // Safe file uploader handler
+  // ==================== LIVE VOICE RECORDER ====================
+  const startVoiceRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioChunksRef.current = [];
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: mediaRecorder.mimeType || 'audio/webm' });
+        const base64 = await blobToBase64(audioBlob);
+        
+        // Stop all microphone audio tracks
+        stream.getTracks().forEach((track) => track.stop());
+
+        setAttachment({
+          name: `Voice Note (${recordingSeconds}s)`,
+          type: 'audio',
+          mimeType: mediaRecorder.mimeType || 'audio/webm',
+          base64: base64,
+        });
+
+        setIsRecording(false);
+        setRecordingSeconds(0);
+        clearInterval(recordingTimerRef.current);
+      };
+
+      mediaRecorder.start(200);
+      setIsRecording(true);
+      setRecordingSeconds(0);
+
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingSeconds((prev) => {
+          if (prev >= 120) { // Max 2 minutes
+            stopVoiceRecording();
+            return 120;
+          }
+          return prev + 1;
+        });
+      }, 1000);
+    } catch (err: any) {
+      console.error("Microphone access error:", err);
+      alert("Microphone access is required to record voice notes. Please allow microphone permissions in your browser.");
+    }
+  };
+
+  const stopVoiceRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+    }
+  };
+
+  const cancelVoiceRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stream.getTracks().forEach((track) => track.stop());
+      mediaRecorderRef.current.stop();
+    }
+    clearInterval(recordingTimerRef.current);
+    setIsRecording(false);
+    setRecordingSeconds(0);
+    audioChunksRef.current = [];
+  };
+
+  // Handle Audio, PDF, Image File Upload
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (file.size > 15 * 1024 * 1024) {
-      alert("Please upload a file smaller than 15MB.");
+    if (file.size > 20 * 1024 * 1024) {
+      alert("Please upload a file smaller than 20MB.");
       return;
     }
 
     setIsProcessingFile(true);
 
     try {
-      if (file.type.startsWith('image/')) {
-        // Image Processing for Vision AI
+      if (file.type.startsWith('audio/') || file.name.match(/\.(mp3|m4a|wav|ogg|aac|webm)$/i)) {
+        // Audio File / Voice Note
+        const base64 = await blobToBase64(file);
+        setAttachment({
+          name: file.name,
+          type: 'audio',
+          mimeType: file.type || 'audio/mp3',
+          base64: base64,
+        });
+      } else if (file.type.startsWith('image/')) {
+        // Image for Groq Vision
         const { base64, mimeType } = await processImageFile(file);
         setAttachment({
           name: file.name,
@@ -259,7 +340,7 @@ const LexAI: React.FC = () => {
           base64,
         });
       } else if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
-        // PDF Extraction
+        // PDF Text Extractor
         const extractedText = await extractPdfText(file);
         setAttachment({
           name: file.name,
@@ -268,7 +349,7 @@ const LexAI: React.FC = () => {
           extractedText,
         });
       } else {
-        // Text / Markdown / Document files
+        // Plain Text / Doc
         const text = await file.text();
         setAttachment({
           name: file.name,
@@ -278,8 +359,8 @@ const LexAI: React.FC = () => {
         });
       }
     } catch (err: any) {
-      console.error("Document parser error:", err);
-      alert(err.message || "Failed to parse document. Please check the file format.");
+      console.error("File processing error:", err);
+      alert(err.message || "Failed to process file.");
     } finally {
       setIsProcessingFile(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -300,9 +381,12 @@ const LexAI: React.FC = () => {
     setAttachment(null);
     if (inputRef.current) inputRef.current.style.height = '48px';
 
-    const displayMsg = currentAttachment 
-      ? `${textToSend}\n\n📎 *Attached: ${currentAttachment.name}*`
-      : textToSend;
+    let displayMsg = textToSend;
+    if (currentAttachment && currentAttachment.type === 'audio') {
+      displayMsg = `🎙️ *Voice Note:* "${currentAttachment.name}"${textToSend ? `\n\n${textToSend}` : ''}`;
+    } else if (currentAttachment) {
+      displayMsg = `${textToSend}\n\n📎 *Attached: ${currentAttachment.name}*`;
+    }
 
     const updatedMessages: Message[] = [...messages, { role: 'user', content: displayMsg }];
     setMessages(updatedMessages);
@@ -347,8 +431,8 @@ const LexAI: React.FC = () => {
   };
 
   const handleEdit = (text: string) => {
-    const cleanText = text.split('\n\n📎')[0];
-    setInput(cleanText);
+    const cleanText = text.split('\n\n📎')[0].split('🎙️ *Voice Note:*')[0];
+    setInput(cleanText.trim());
     if (inputRef.current) {
       inputRef.current.focus();
       inputRef.current.style.height = '48px';
@@ -589,14 +673,14 @@ const LexAI: React.FC = () => {
             </h2>
             
             <p className="text-slate-500 dark:text-slate-400 text-xs sm:text-sm mb-7 leading-relaxed max-w-md">
-              Your AI legal assistant. Ask legal questions, audit uploaded PDFs and images, paste web links, or draft contracts with practical guidance.
+              Your AI legal assistant. Speak a voice note, upload contracts and photos, paste web links, or ask legal questions with practical guidance.
             </p>
 
             <div className="w-full space-y-2.5">
               {[
-                'Audit a contract or uploaded document.',
-                'Help me understand a legal issue.',
-                'Research a Nigerian or US legal precedent.',
+                'Record or upload a voice note describing your issue.',
+                'Audit an attached contract or uploaded image.',
+                'Help me understand a Nigerian or US legal dispute.',
                 'Draft a contract or non-disclosure agreement.',
               ].map((suggestion) => (
                 <button
@@ -706,7 +790,7 @@ const LexAI: React.FC = () => {
                 <div className="bg-slate-100 dark:bg-white/5 border border-slate-200/50 dark:border-white/5 rounded-2xl rounded-tl-md px-4 py-3.5 shadow-xs">
                   <div className="flex items-center gap-2">
                     <Loader2 size={14} className="animate-spin text-blue-600 dark:text-[#B4975A]" />
-                    <span className="text-xs text-slate-500 dark:text-slate-400">Lex AI is researching & auditing...</span>
+                    <span className="text-xs text-slate-500 dark:text-slate-400">Lex AI is reviewing & analyzing...</span>
                   </div>
                 </div>
               </motion.div>
@@ -716,21 +800,27 @@ const LexAI: React.FC = () => {
         )}
       </div>
 
-      {/* INPUT DOCK WITH FILE ATTACHMENT */}
+      {/* ==================== INPUT DOCK WITH LIVE VOICE RECORDER ==================== */}
       <div className="shrink-0 px-3 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-white dark:bg-[#171717] border-t border-slate-200/50 dark:border-white/5 z-30">
         <div className="max-w-3xl mx-auto">
           
           {/* ATTACHMENT PREVIEW BADGE */}
           <AnimatePresence>
-            {attachment && (
+            {attachment && !isRecording && (
               <motion.div
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: 8 }}
-                className="mb-2 p-2 bg-slate-100 dark:bg-white/10 rounded-xl border border-slate-200 dark:border-white/10 flex items-center justify-between text-xs text-slate-700 dark:text-slate-200"
+                className="mb-2 p-2.5 bg-slate-100 dark:bg-white/10 rounded-xl border border-slate-200 dark:border-white/10 flex items-center justify-between text-xs text-slate-700 dark:text-slate-200 shadow-xs"
               >
-                <div className="flex items-center gap-2 truncate pr-2">
-                  {attachment.type === 'image' ? <ImageIcon size={16} className="text-blue-500" /> : <FileText size={16} className="text-amber-500" />}
+                <div className="flex items-center gap-2.5 truncate pr-2">
+                  {attachment.type === 'audio' ? (
+                    <Volume2 size={16} className="text-purple-500 shrink-0" />
+                  ) : attachment.type === 'image' ? (
+                    <ImageIcon size={16} className="text-blue-500 shrink-0" />
+                  ) : (
+                    <FileText size={16} className="text-amber-500 shrink-0" />
+                  )}
                   <span className="font-bold truncate">{attachment.name}</span>
                   <span className="text-[10px] text-slate-400 uppercase font-mono">({attachment.type})</span>
                 </div>
@@ -745,67 +835,103 @@ const LexAI: React.FC = () => {
             )}
           </AnimatePresence>
 
-          <div className="relative bg-slate-100 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl focus-within:border-slate-400 dark:focus-within:border-white/20 focus-within:bg-white dark:focus-within:bg-white/10 transition-all flex items-center">
-            
-            {/* Hidden File Input */}
-            <input
-              type="file"
-              ref={fileInputRef}
-              onChange={handleFileUpload}
-              accept=".pdf,.png,.jpg,.jpeg,.webp,.txt,.doc,.docx"
-              className="hidden"
-            />
+          {/* LIVE RECORDING BAR OR TEXT DOCK */}
+          {isRecording ? (
+            <div className="bg-rose-500/10 dark:bg-rose-950/40 border border-rose-500/30 rounded-2xl p-3 flex items-center justify-between animate-pulse shadow-sm">
+              <div className="flex items-center gap-3">
+                <div className="w-3 h-3 bg-rose-500 rounded-full animate-ping" />
+                <span className="text-xs font-bold text-rose-500">
+                  Recording Voice Note ({Math.floor(recordingSeconds / 60)}:{('0' + (recordingSeconds % 60)).slice(-2)})
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={cancelVoiceRecording}
+                  className="px-3 py-1.5 rounded-xl bg-slate-200 dark:bg-white/10 text-slate-600 dark:text-slate-300 text-xs font-semibold hover:bg-slate-300 border-0 cursor-pointer transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={stopVoiceRecording}
+                  className="px-4 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold flex items-center gap-1.5 border-0 cursor-pointer shadow-md transition-all active:scale-95"
+                >
+                  <Square size={12} fill="currentColor" /> Stop & Attach
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="relative bg-slate-100 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl focus-within:border-slate-400 dark:focus-within:border-white/20 focus-within:bg-white dark:focus-within:bg-white/10 transition-all flex items-center">
+              
+              {/* Hidden File Input */}
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileUpload}
+                accept=".pdf,.png,.jpg,.jpeg,.webp,.txt,.doc,.docx,.mp3,.m4a,.wav,.ogg,.aac,.webm"
+                className="hidden"
+              />
 
-            {/* Paperclip Button */}
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={isProcessingFile}
-              className="pl-3.5 pr-2 text-slate-400 hover:text-slate-700 dark:hover:text-white transition-colors bg-transparent border-0 cursor-pointer disabled:opacity-50"
-              title="Attach PDF, Contract, or Image for review"
-            >
-              {isProcessingFile ? <Loader2 size={18} className="animate-spin text-blue-500" /> : <Paperclip size={18} />}
-            </button>
+              {/* Attachment Picker Button */}
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isProcessingFile}
+                className="pl-3.5 pr-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-white transition-colors bg-transparent border-0 cursor-pointer disabled:opacity-50"
+                title="Attach PDF, Document, Photo, or Audio File"
+              >
+                {isProcessingFile ? <Loader2 size={18} className="animate-spin text-blue-500" /> : <Paperclip size={18} />}
+              </button>
 
-            <textarea
-              ref={inputRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  sendMessage();
-                }
-              }}
-              placeholder="Ask a legal question, audit document, or paste a link…"
-              rows={1}
-              className="w-full py-3.5 pr-12 pl-2 bg-transparent text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 outline-none resize-none max-h-28"
-              style={{ minHeight: '48px' }}
-              onInput={(e) => {
-                const t = e.target as HTMLTextAreaElement;
-                t.style.height = '48px';
-                t.style.height = Math.min(t.scrollHeight, 112) + 'px';
-              }}
-            />
-            
-            <button
-              onClick={() => sendMessage()}
-              disabled={isLoading || (!input.trim() && !attachment)}
-              className={cn(
-                'absolute right-2 bottom-2 w-8 h-8 rounded-xl flex items-center justify-center transition-all active:scale-90',
-                (input.trim() || attachment) && !isLoading
-                  ? 'bg-slate-900 dark:bg-white text-white dark:text-black'
-                  : 'bg-slate-200 dark:bg-white/10 text-slate-400 dark:text-slate-600'
-              )}
-              aria-label="Send Message"
-            >
-              {isLoading ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-            </button>
-          </div>
+              {/* Live Microphone Recording Button */}
+              <button
+                type="button"
+                onClick={startVoiceRecording}
+                className="px-1.5 text-slate-400 hover:text-purple-600 dark:hover:text-purple-400 transition-colors bg-transparent border-0 cursor-pointer"
+                title="Record live voice note"
+              >
+                <Mic size={18} />
+              </button>
+
+              <textarea
+                ref={inputRef}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    sendMessage();
+                  }
+                }}
+                placeholder="Ask a legal question, record voice, or attach document…"
+                rows={1}
+                className="w-full py-3.5 pr-12 pl-2 bg-transparent text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 outline-none resize-none max-h-28"
+                style={{ minHeight: '48px' }}
+                onInput={(e) => {
+                  const t = e.target as HTMLTextAreaElement;
+                  t.style.height = '48px';
+                  t.style.height = Math.min(t.scrollHeight, 112) + 'px';
+                }}
+              />
+              
+              <button
+                onClick={() => sendMessage()}
+                disabled={isLoading || (!input.trim() && !attachment)}
+                className={cn(
+                  'absolute right-2 bottom-2 w-8 h-8 rounded-xl flex items-center justify-center transition-all active:scale-90',
+                  (input.trim() || attachment) && !isLoading
+                    ? 'bg-slate-900 dark:bg-white text-white dark:text-black'
+                    : 'bg-slate-200 dark:bg-white/10 text-slate-400 dark:text-slate-600'
+                )}
+                aria-label="Send Message"
+              >
+                {isLoading ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+              </button>
+            </div>
+          )}
 
           <div className="flex flex-col sm:flex-row justify-between items-center px-1 mt-2 text-[10px] text-slate-400 dark:text-slate-500 gap-1 text-center sm:text-left leading-tight">
             <span>{messagesRemaining} verified inquiries left today.</span>
-            <span>Lex AI provides legal information, not legal representation. Verify important advice with a qualified lawyer.</span>
+            <span>Lex AI provides legal information, not legal representation. Verify important advice with a lawyer.</span>
           </div>
         </div>
       </div>
