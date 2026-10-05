@@ -11,6 +11,7 @@ const corsHeaders = {
   "Content-Type": "application/json",
 };
 
+// Web Browsing Helper
 async function browseWebpage(url: string): Promise<string> {
   try {
     const controller = new AbortController();
@@ -42,6 +43,44 @@ async function browseWebpage(url: string): Promise<string> {
   }
 }
 
+// Voice Note Transcriber via Groq Whisper (< 300ms)
+async function transcribeAudio(base64Data: string, mimeType: string, fileName: string, groqApiKey: string): Promise<string> {
+  try {
+    const binaryStr = atob(base64Data);
+    const len = binaryStr.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+      bytes[i] = binaryStr.charCodeAt(i);
+    }
+
+    const audioBlob = new Blob([bytes], { type: mimeType || 'audio/webm' });
+    const formData = new FormData();
+    formData.append('file', audioBlob, fileName || 'voicenote.webm');
+    formData.append('model', 'whisper-large-v3-turbo');
+    formData.append('response_format', 'json');
+
+    const res = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${groqApiKey}`,
+      },
+      body: formData,
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      console.error("Groq Whisper error:", errText);
+      return "[Voice transcription unavailable]";
+    }
+
+    const data = await res.json();
+    return data.text || "";
+  } catch (err: any) {
+    console.error("Audio transcription error:", err.message);
+    return "[Voice transcription error]";
+  }
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -65,7 +104,7 @@ serve(async (req) => {
     const action = url.searchParams.get("action") || "send";
     const headerUserId = req.headers.get("x-user-id");
 
-    // 1. List conversations
+    // 1. List
     if (action === "list") {
       const targetUser = url.searchParams.get("user_id") || headerUserId || "public_user";
       const { data } = await supabase
@@ -112,10 +151,10 @@ serve(async (req) => {
       return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
     }
 
-    // 4. Process Chat Message
+    // 4. Send Message (Multimodal + Audio Transcription)
     const body = await req.json();
-    const {
-      message,
+    let {
+      message = "",
       messages = [],
       conversation_id,
       jurisdiction = "Nigerian Law",
@@ -125,8 +164,17 @@ serve(async (req) => {
 
     const activeUserId = user_id || headerUserId || "public_user";
 
+    // Transcribe audio / voice note if attached
+    let audioTranscript = "";
+    if (attachment && attachment.type === "audio" && attachment.base64) {
+      audioTranscript = await transcribeAudio(attachment.base64, attachment.mimeType, attachment.name, groqKey);
+      if (audioTranscript && audioTranscript.trim().length > 0) {
+        message = message ? `${message}\n\n[Spoken Voice Note]: "${audioTranscript}"` : audioTranscript;
+      }
+    }
+
     if ((!message || message.trim() === "") && !attachment) {
-      return new Response(JSON.stringify({ error: "Please provide a legal inquiry." }), {
+      return new Response(JSON.stringify({ error: "Please provide a legal inquiry, upload a document, or record a voice note." }), {
         status: 400,
         headers: corsHeaders,
       });
@@ -162,7 +210,7 @@ serve(async (req) => {
       updated_at: new Date().toISOString(),
     }, { onConflict: "user_id, usage_date" });
 
-    // Web browsing helper
+    // Web browsing extraction
     let webContext = "";
     const urlMatches = message.match(/https?:\/\/[^\s]+/g);
     if (urlMatches && urlMatches.length > 0) {
@@ -193,9 +241,13 @@ serve(async (req) => {
 
     // Save user message in DB
     if (convId) {
-      const displayMsg = attachment 
-        ? `${message}\n\n📎 *Attached file: ${attachment.name}*`
-        : message;
+      let displayMsg = message;
+      if (attachment && attachment.type === 'audio') {
+        displayMsg = `🎙️ *Voice Note:* "${audioTranscript || 'Audio attachment'}"${message && message !== audioTranscript ? `\n\n${message}` : ''}`;
+      } else if (attachment) {
+        displayMsg = `${message}\n\n📎 *Attached: ${attachment.name}*`;
+      }
+
       await supabase.from("messages").insert({
         conversation_id: convId,
         role: "user",
@@ -216,46 +268,42 @@ serve(async (req) => {
       }
     } catch { /* silent */ }
 
-    // Check if this is the start of a chat or a follow-up turn
     const isFollowUpTurn = Array.isArray(messages) && messages.length >= 2;
 
-    // SYSTEM PROMPT: SINGLE-INTAKE PROTOCOL (NO ENDLESS LOOPS)
-    const systemPrompt = `You are Lex AI, a senior legal counsel and legal assistant specializing in ${jurisdiction}.
+    // SYSTEM PROMPT
+    const systemPrompt = `You are Lex AI, a senior legal counsel and multimodal legal intelligence assistant specializing in ${jurisdiction}.
+
+CAPABILITIES:
+1. VOICE NOTE INTERPRETATION: You can listen to and process transcribed user voice recordings. Treat them with the same legal rigor as written questions.
+2. DOCUMENT & PDF AUDITING: Review uploaded contracts, identifying loopholes, liabilities, and statutory compliance.
+3. VISUAL INSPECTION: Inspect images of signed documents, receipts, or property evidence.
+4. WEB RESEARCH: Analyze live browsed webpage contents.
 
 OPERATIONAL RULES:
-
 1. DRAFTING & DIRECT QUESTIONS:
-If the user asks to draft a contract, review an attachment/text, or asks an informational question (e.g., "Draft an NDA", "Explain tenancy notice", "What is Section 305 CAMA?"), answer and draft IMMEDIATELY without asking unnecessary questions.
+If the user asks to draft a contract, review an attachment, or asks an informational question, answer or draft IMMEDIATELY without asking unnecessary questions.
 
-2. NEW COMPLEX LEGAL DISPUTES (FIRST MESSAGE ONLY):
-If the user describes a fresh legal problem or dispute that requires specific facts:
+2. NEW COMPLEX LEGAL DISPUTES (FIRST TURN ONLY):
+If the user describes a fresh legal problem that requires specific facts:
 - Acknowledge their situation with professional empathy.
 - Give a brief 2-sentence initial legal overview.
-- List ALL the questions you need in ONE single clear, numbered list (maximum 3-4 questions: parties involved, timeline/dates, written documents/evidence, and desired outcome).
+- List ALL the questions you need in ONE single clear, numbered list (maximum 3-4 questions).
 - Inform the user: "Once you share these details, I will provide your complete legal analysis and action plan."
-- NEVER ask questions more than once!
+- NEVER ask questions in a loop!
 
 3. SECOND TURN / AFTER USER REPLIES (PROCEED IMMEDIATELY):
-${isFollowUpTurn ? "CRITICAL: The user is now providing details. YOU MUST PROCEED IMMEDIATELY TO THE COMPLETE LEGAL ANALYSIS. DO NOT ASK ANY MORE QUESTIONS. Work with the facts provided and state any necessary assumptions." : "Once the user provides details on the next turn, proceed directly to the full analysis without asking another round of questions."}
+${isFollowUpTurn ? "CRITICAL: The user is now providing details. PROCEED IMMEDIATELY TO THE COMPLETE LEGAL ANALYSIS. DO NOT ASK ANY MORE QUESTIONS." : "Once the user provides details on the next turn, proceed directly to the full analysis without asking another round of questions."}
 
-STRUCTURE OF FULL LEGAL ANALYSIS (When delivering final analysis):
+STRUCTURE OF FULL LEGAL ANALYSIS:
 ### 1. LEGAL ISSUES IDENTIFIED
-[Concise breakdown of the core legal issues]
-
 ### 2. APPLICABLE LAWS & STATUTES (WITH CITATIONS)
-[Cite exact sections from relevant Acts, e.g., CAMA 2020 Sec. 305, 1999 Constitution, or relevant case precedents under ${jurisdiction}]
-
 ### 3. LEGAL ANALYSIS
-[Step-by-step application of the legal rules to the user's specific facts]
-
 ### 4. STRATEGIC OPTIONS & RECOMMENDED NEXT STEPS
-[Practical, actionable steps: demand letter, mediation, regulatory report, court filing, etc.]
-
 ### 5. SOURCES CITED
 - [List exact Acts, Sections, Case Law, and documents consulted]
 
 ***
-⚖️ *Lex AI provides legal information, not legal representation. Verify important legal advice and citations with a qualified lawyer before taking formal action.*
+⚖️ *Lex AI provides legal information, not legal representation. Verify important legal advice and citations with a qualified lawyer.*
 
 ${webContext}
 ${attachment?.extractedText ? `\n\n[ATTACHED DOCUMENT CONTENT (${attachment.name})]:\n${attachment.extractedText}\n` : ""}
@@ -335,6 +383,7 @@ ${legalContext ? `\nRELEVANT STATUTORY REFERENCES:\n${legalContext}` : ""}`;
       JSON.stringify({
         response: reply,
         conversation_id: convId,
+        transcription: audioTranscript || undefined,
         usage: {
           count: usedSoFar + 1,
           limit: DAILY_LIMIT,
