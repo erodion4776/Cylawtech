@@ -4,7 +4,7 @@ import {
   Plus, Send, Loader2, MessageSquare, Trash2,
   Scale, Menu, X, Home, Info, Mail,
   Lock, Sparkles, ChevronDown, Copy, Check, Pencil,
-  LogOut, User as UserIcon
+  LogOut, User as UserIcon, Paperclip, FileText, Image as ImageIcon
 } from 'lucide-react';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import { cn } from '../lib/utils';
@@ -12,8 +12,20 @@ import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import Markdown from 'react-markdown';
 
+// Load PDF.js worker from CDN for browser text extraction
+import * as pdfjsLib from 'pdfjs-dist';
+pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+
 const API_BASE = '/api/chat';
 const DAILY_LIMIT = 10;
+
+interface AttachmentData {
+  name: string;
+  type: 'image' | 'pdf' | 'text';
+  mimeType: string;
+  base64?: string;
+  extractedText?: string;
+}
 
 interface Conversation {
   id: string;
@@ -30,7 +42,7 @@ interface Message {
 }
 
 const LexAI: React.FC = () => {
-  useDocumentTitle('Lex AI - Nigerian Legal AI Assistant');
+  useDocumentTitle('Lex AI - Nigerian & US Legal Assistant');
   const navigate = useNavigate();
 
   const [user, setUser] = useState<any>(null);
@@ -43,6 +55,11 @@ const LexAI: React.FC = () => {
   const [mode, setMode] = useState<'prep' | 'training' | 'practice'>('prep');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [showJurisdictionPicker, setShowJurisdictionPicker] = useState(false);
+
+  // Attachment State
+  const [attachment, setAttachment] = useState<AttachmentData | null>(null);
+  const [isProcessingFile, setIsProcessingFile] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Database usage tracking
   const [dbUsageCount, setDbUsageCount] = useState(0);
@@ -58,7 +75,6 @@ const LexAI: React.FC = () => {
 
   useEffect(() => { scrollToBottom(); }, [messages, isLoading, scrollToBottom]);
 
-  // Load authenticated user and their specific chat history
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (user) {
@@ -75,9 +91,7 @@ const LexAI: React.FC = () => {
       setConversations(data.conversations || []);
       if (data.usage) {
         setDbUsageCount(data.usage.count || 0);
-        if (data.usage.count >= DAILY_LIMIT) {
-          setShowPaywall(true);
-        }
+        if (data.usage.count >= DAILY_LIMIT) setShowPaywall(true);
       }
     } catch { /* silent */ }
   };
@@ -101,6 +115,7 @@ const LexAI: React.FC = () => {
     setActiveConvId(null);
     setMessages([]);
     setInput('');
+    setAttachment(null);
     setDrawerOpen(false);
     inputRef.current?.focus();
   };
@@ -121,19 +136,91 @@ const LexAI: React.FC = () => {
     navigate('/auth');
   };
 
+  // Handle File Upload (PDFs, Images, Documents)
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 10 * 1024 * 1024) {
+      alert("Please upload a file smaller than 10MB.");
+      return;
+    }
+
+    setIsProcessingFile(true);
+
+    try {
+      if (file.type.startsWith('image/')) {
+        // Read Image as Base64 for Groq Vision AI
+        const reader = new FileReader();
+        reader.onload = () => {
+          const base64String = (reader.result as string).split(',')[1];
+          setAttachment({
+            name: file.name,
+            type: 'image',
+            mimeType: file.type,
+            base64: base64String,
+          });
+          setIsProcessingFile(false);
+        };
+        reader.readAsDataURL(file);
+      } else if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
+        // Extract text directly from PDF
+        const arrayBuffer = await file.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        let fullText = '';
+
+        const maxPages = Math.min(pdf.numPages, 15); // Parse up to 15 pages
+        for (let i = 1; i <= maxPages; i++) {
+          const page = await pdf.getPage(i);
+          const content = await page.getTextContent();
+          const pageText = content.items.map((item: any) => item.str).join(' ');
+          fullText += `\n--- [Page ${i}] ---\n` + pageText;
+        }
+
+        setAttachment({
+          name: file.name,
+          type: 'pdf',
+          mimeType: file.type,
+          extractedText: fullText.trim(),
+        });
+        setIsProcessingFile(false);
+      } else {
+        // Read plain text / doc files
+        const text = await file.text();
+        setAttachment({
+          name: file.name,
+          type: 'text',
+          mimeType: file.type || 'text/plain',
+          extractedText: text.substring(0, 15000),
+        });
+        setIsProcessingFile(false);
+      }
+    } catch (err: any) {
+      console.error("File processing error:", err);
+      alert("Could not process this document. Please try a different PDF or image.");
+      setIsProcessingFile(false);
+    }
+  };
+
   const sendMessage = async (overrideMessage?: string) => {
     const textToSend = (overrideMessage || input).trim();
-    if (!textToSend || isLoading) return;
+    if ((!textToSend && !attachment) || isLoading) return;
 
     if (dbUsageCount >= DAILY_LIMIT) {
       setShowPaywall(true);
       return;
     }
 
+    const currentAttachment = attachment;
     setInput('');
+    setAttachment(null);
     if (inputRef.current) inputRef.current.style.height = '48px';
 
-    const updatedMessages: Message[] = [...messages, { role: 'user', content: textToSend }];
+    const displayMsg = currentAttachment 
+      ? `${textToSend}\n\n📎 *Attached: ${currentAttachment.name}*`
+      : textToSend;
+
+    const updatedMessages: Message[] = [...messages, { role: 'user', content: displayMsg }];
     setMessages(updatedMessages);
     setIsLoading(true);
 
@@ -147,17 +234,13 @@ const LexAI: React.FC = () => {
           conversation_id: activeConvId,
           jurisdiction: jurisdiction === 'nigeria' ? 'Nigerian Law' : 'US Federal Law',
           user_id: user?.id || 'authenticated_user',
+          attachment: currentAttachment,
         }),
       });
       const data = await res.json();
 
-      if (data.paywall) {
-        setShowPaywall(true);
-      }
-
-      if (data.usage) {
-        setDbUsageCount(data.usage.count);
-      }
+      if (data.paywall) setShowPaywall(true);
+      if (data.usage) setDbUsageCount(data.usage.count);
 
       if (data.error && !data.response) {
         setMessages(prev => [...prev, { role: 'assistant', content: data.error }]);
@@ -167,7 +250,7 @@ const LexAI: React.FC = () => {
         if (user) fetchConversations(user.id);
       }
     } catch {
-      setMessages(prev => [...prev, { role: 'assistant', content: 'Unable to connect to Lex AI. Please check your internet connection and try again.' }]);
+      setMessages(prev => [...prev, { role: 'assistant', content: 'Unable to connect to Lex AI. Please check your internet connection.' }]);
     } finally {
       setIsLoading(false);
     }
@@ -180,7 +263,9 @@ const LexAI: React.FC = () => {
   };
 
   const handleEdit = (text: string) => {
-    setInput(text);
+    // Strip attachment badge note if editing
+    const cleanText = text.split('\n\n📎')[0];
+    setInput(cleanText);
     if (inputRef.current) {
       inputRef.current.focus();
       inputRef.current.style.height = '48px';
@@ -260,7 +345,6 @@ const LexAI: React.FC = () => {
                 </button>
               </div>
 
-              {/* Authenticated Conversations History */}
               <div className="flex-1 overflow-y-auto px-2 py-3 space-y-0.5 overscroll-contain">
                 {conversations.length === 0 ? (
                   <p className="text-xs text-slate-600 text-center mt-10 px-4">No conversations stored yet.</p>
@@ -286,7 +370,6 @@ const LexAI: React.FC = () => {
                 )}
               </div>
 
-              {/* Database Usage Meter */}
               <div className="mx-3 mb-2 p-3 bg-white/5 rounded-xl border border-white/5">
                 <div className="flex justify-between items-center mb-1.5 text-[10px] font-bold tracking-wider text-slate-400 uppercase">
                   <span>Daily Quota</span>
@@ -300,7 +383,6 @@ const LexAI: React.FC = () => {
                 </div>
               </div>
 
-              {/* User Profile & Navigation */}
               <nav className="p-3 border-t border-white/10 bg-[#0f0f0f] space-y-1">
                 {user && (
                   <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-white/5 mb-2 text-xs text-slate-300">
@@ -319,7 +401,7 @@ const LexAI: React.FC = () => {
                     key={link.to}
                     to={link.to}
                     onClick={() => setDrawerOpen(false)}
-                    className="flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:bg-white/5 hover:text-slate-100 transition-all active:scale-[0.98]"
+                    className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold text-slate-400 hover:bg-white/5 hover:text-slate-100 transition-all active:scale-[0.98]"
                   >
                     <link.icon size={14} className="shrink-0 opacity-60" />
                     <span>{link.label}</span>
@@ -411,7 +493,7 @@ const LexAI: React.FC = () => {
         <div className="fixed inset-0 z-30" onClick={() => setShowJurisdictionPicker(false)} />
       )}
 
-      {/* MESSAGES STREAM */}
+      {/* MESSAGES VIEW */}
       <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 py-4">
         {messages.length === 0 ? (
           <div className="min-h-full flex flex-col items-center justify-center text-center max-w-lg mx-auto py-6">
@@ -424,22 +506,19 @@ const LexAI: React.FC = () => {
             </h2>
             
             <p className="text-slate-500 dark:text-slate-400 text-xs sm:text-sm mb-7 leading-relaxed max-w-md">
-              Your AI legal assistant. Ask legal questions, research legal issues, draft and review contracts and other legal documents, and get practical guidance on your legal matters.
+              Your AI legal assistant. Ask legal questions, audit uploaded PDFs and images, paste web links, or draft contracts with practical guidance.
             </p>
 
             <div className="w-full space-y-2.5">
               {[
+                'Audit a contract or uploaded document.',
                 'Help me understand a legal issue.',
-                'Research a Nigerian law or legal precedent.',
-                'Draft a contract or legal document.',
-                'Review a contract or legal document.',
+                'Research a Nigerian or US legal precedent.',
+                'Draft a contract or non-disclosure agreement.',
               ].map((suggestion) => (
                 <button
                   key={suggestion}
-                  onClick={() => {
-                    setInput(suggestion);
-                    inputRef.current?.focus();
-                  }}
+                  onClick={() => { setInput(suggestion); inputRef.current?.focus(); }}
                   className="w-full text-left p-3.5 rounded-2xl border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 hover:bg-slate-50 dark:hover:bg-white/10 text-xs sm:text-sm font-medium text-slate-700 dark:text-slate-200 transition-all active:scale-[0.98] shadow-xs"
                 >
                   {suggestion}
@@ -544,7 +623,7 @@ const LexAI: React.FC = () => {
                 <div className="bg-slate-100 dark:bg-white/5 border border-slate-200/50 dark:border-white/5 rounded-2xl rounded-tl-md px-4 py-3.5 shadow-xs">
                   <div className="flex items-center gap-2">
                     <Loader2 size={14} className="animate-spin text-blue-600 dark:text-[#B4975A]" />
-                    <span className="text-xs text-slate-500 dark:text-slate-400">Lex AI is researching...</span>
+                    <span className="text-xs text-slate-500 dark:text-slate-400">Lex AI is researching & auditing...</span>
                   </div>
                 </div>
               </motion.div>
@@ -554,10 +633,57 @@ const LexAI: React.FC = () => {
         )}
       </div>
 
-      {/* INPUT DOCK */}
+      {/* INPUT DOCK WITH FILE ATTACHMENT */}
       <div className="shrink-0 px-3 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-white dark:bg-[#171717] border-t border-slate-200/50 dark:border-white/5 z-30">
         <div className="max-w-3xl mx-auto">
-          <div className="relative bg-slate-100 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl focus-within:border-slate-400 dark:focus-within:border-white/20 focus-within:bg-white dark:focus-within:bg-white/10 transition-all">
+          
+          {/* ATTACHMENT PREVIEW BADGE */}
+          <AnimatePresence>
+            {attachment && (
+              <motion.div
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 8 }}
+                className="mb-2 p-2 bg-slate-100 dark:bg-white/10 rounded-xl border border-slate-200 dark:border-white/10 flex items-center justify-between text-xs text-slate-700 dark:text-slate-200"
+              >
+                <div className="flex items-center gap-2 truncate pr-2">
+                  {attachment.type === 'image' ? <ImageIcon size={16} className="text-blue-500" /> : <FileText size={16} className="text-amber-500" />}
+                  <span className="font-bold truncate">{attachment.name}</span>
+                  <span className="text-[10px] text-slate-400 uppercase font-mono">({attachment.type})</span>
+                </div>
+                <button
+                  onClick={() => setAttachment(null)}
+                  className="p-1 text-slate-400 hover:text-rose-500 bg-transparent border-0 cursor-pointer"
+                  title="Remove attachment"
+                >
+                  <X size={14} />
+                </button>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          <div className="relative bg-slate-100 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl focus-within:border-slate-400 dark:focus-within:border-white/20 focus-within:bg-white dark:focus-within:bg-white/10 transition-all flex items-center">
+            
+            {/* Hidden File Input */}
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleFileUpload}
+              accept=".pdf,.png,.jpg,.jpeg,.webp,.txt,.doc,.docx"
+              className="hidden"
+            />
+
+            {/* Paperclip Button */}
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isProcessingFile}
+              className="pl-3.5 pr-2 text-slate-400 hover:text-slate-700 dark:hover:text-white transition-colors bg-transparent border-0 cursor-pointer disabled:opacity-50"
+              title="Attach PDF, Contract, or Image for review"
+            >
+              {isProcessingFile ? <Loader2 size={18} className="animate-spin text-blue-500" /> : <Paperclip size={18} />}
+            </button>
+
             <textarea
               ref={inputRef}
               value={input}
@@ -568,9 +694,9 @@ const LexAI: React.FC = () => {
                   sendMessage();
                 }
               }}
-              placeholder="Ask Lex AI a legal question…"
+              placeholder="Ask a legal question, audit document, or paste a link…"
               rows={1}
-              className="w-full pl-4 pr-12 py-3.5 bg-transparent text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 outline-none resize-none max-h-28"
+              className="w-full py-3.5 pr-12 pl-2 bg-transparent text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 outline-none resize-none max-h-28"
               style={{ minHeight: '48px' }}
               onInput={(e) => {
                 const t = e.target as HTMLTextAreaElement;
@@ -578,12 +704,13 @@ const LexAI: React.FC = () => {
                 t.style.height = Math.min(t.scrollHeight, 112) + 'px';
               }}
             />
+            
             <button
               onClick={() => sendMessage()}
-              disabled={isLoading || !input.trim()}
+              disabled={isLoading || (!input.trim() && !attachment)}
               className={cn(
                 'absolute right-2 bottom-2 w-8 h-8 rounded-xl flex items-center justify-center transition-all active:scale-90',
-                input.trim() && !isLoading
+                (input.trim() || attachment) && !isLoading
                   ? 'bg-slate-900 dark:bg-white text-white dark:text-black'
                   : 'bg-slate-200 dark:bg-white/10 text-slate-400 dark:text-slate-600'
               )}
@@ -595,7 +722,7 @@ const LexAI: React.FC = () => {
 
           <div className="flex flex-col sm:flex-row justify-between items-center px-1 mt-2 text-[10px] text-slate-400 dark:text-slate-500 gap-1 text-center sm:text-left leading-tight">
             <span>{messagesRemaining} verified inquiries left today.</span>
-            <span>Lex AI provides legal information, not legal representation. Verify important legal advice with a qualified lawyer.</span>
+            <span>Lex AI provides legal information, not legal representation. Verify important advice with a qualified lawyer.</span>
           </div>
         </div>
       </div>
