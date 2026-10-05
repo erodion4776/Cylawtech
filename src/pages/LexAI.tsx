@@ -239,7 +239,7 @@ const LexAI: React.FC = () => {
     navigate('/auth');
   };
 
-  // Live Voice Recording
+  // ==================== LIVE VOICE RECORDER ====================
   const startVoiceRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -811,7 +811,7 @@ const LexAI: React.FC = () => {
                 <div className="bg-slate-100 dark:bg-white/5 border border-slate-200/50 dark:border-white/5 rounded-2xl rounded-tl-md px-4 py-3.5 shadow-xs">
                   <div className="flex items-center gap-2">
                     <Loader2 size={14} className="animate-spin text-blue-600 dark:text-[#B4975A]" />
-                    <span className="text-xs text-slate-500 dark:text-slate-400">Lex AI is reviewing & analyzing...</span>
+                    <span className="text-xs text-slate-500 dark:text-slate-400">Lex AI is researching & auditing...</span>
                   </div>
                 </div>
               </motion.div>
@@ -821,7 +821,7 @@ const LexAI: React.FC = () => {
         )}
       </div>
 
-      {/* INPUT DOCK WITH LIVE VOICE RECORDER */}
+      {/* ==================== INPUT DOCK WITH LIVE VOICE RECORDER ==================== */}
       <div className="shrink-0 px-3 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-white dark:bg-[#171717] border-t border-slate-200/50 dark:border-white/5 z-30">
         <div className="max-w-3xl mx-auto">
           
