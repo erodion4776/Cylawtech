@@ -11,6 +11,37 @@ const corsHeaders = {
   "Content-Type": "application/json",
 };
 
+async function browseWebpage(url: string): Promise<string> {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 6000);
+
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,text/plain",
+      }
+    });
+    clearTimeout(timeout);
+
+    if (!res.ok) return `[Web browsing failed: HTTP status ${res.status}]`;
+
+    const html = await res.text();
+    const cleanText = html
+      .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
+      .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, "")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    return cleanText.substring(0, 4000);
+  } catch (err: any) {
+    console.warn("Web browsing error:", err.message);
+    return "";
+  }
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -34,9 +65,7 @@ serve(async (req) => {
     const action = url.searchParams.get("action") || "send";
     const headerUserId = req.headers.get("x-user-id");
 
-    // ==========================================
-    // ACTION: Get Conversations (Scoped to user_id)
-    // ==========================================
+    // Action: List
     if (action === "list") {
       const targetUser = url.searchParams.get("user_id") || headerUserId || "public_user";
       const { data } = await supabase
@@ -46,7 +75,6 @@ serve(async (req) => {
         .order("updated_at", { ascending: false })
         .limit(50);
 
-      // Also fetch today's database usage count
       const today = new Date().toISOString().split("T")[0];
       const { data: usageData } = await supabase
         .from("user_daily_usage")
@@ -60,19 +88,13 @@ serve(async (req) => {
       return new Response(
         JSON.stringify({ 
           conversations: data || [],
-          usage: {
-            count: currentCount,
-            limit: DAILY_LIMIT,
-            remaining: Math.max(0, DAILY_LIMIT - currentCount)
-          }
+          usage: { count: currentCount, limit: DAILY_LIMIT, remaining: Math.max(0, DAILY_LIMIT - currentCount) }
         }), 
         { headers: corsHeaders }
       );
     }
 
-    // ==========================================
-    // ACTION: Get Conversation History
-    // ==========================================
+    // Action: History
     if (action === "history") {
       const { conversation_id } = await req.json();
       const { data } = await supabase
@@ -83,18 +105,14 @@ serve(async (req) => {
       return new Response(JSON.stringify({ messages: data || [] }), { headers: corsHeaders });
     }
 
-    // ==========================================
-    // ACTION: Delete Conversation
-    // ==========================================
+    // Action: Delete
     if (action === "delete") {
       const { conversation_id } = await req.json();
       await supabase.from("conversations").delete().eq("id", conversation_id);
       return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
     }
 
-    // ==========================================
-    // ACTION: Send Message & Record In Database
-    // ==========================================
+    // Action: Send Message
     const body = await req.json();
     const {
       message,
@@ -102,18 +120,19 @@ serve(async (req) => {
       conversation_id,
       jurisdiction = "Nigerian Law",
       user_id = "public_user",
+      attachment,
     } = body;
 
     const activeUserId = user_id || headerUserId || "public_user";
 
-    if (!message || message.trim() === "") {
-      return new Response(JSON.stringify({ error: "Please enter a legal inquiry." }), {
+    if ((!message || message.trim() === "") && !attachment) {
+      return new Response(JSON.stringify({ error: "Please provide a legal inquiry." }), {
         status: 400,
         headers: corsHeaders,
       });
     }
 
-    // 1. Check & Enforce Database Daily Rate Limit
+    // Rate Limit Check
     const today = new Date().toISOString().split("T")[0];
     const { data: currentUsage } = await supabase
       .from("user_daily_usage")
@@ -135,7 +154,7 @@ serve(async (req) => {
       );
     }
 
-    // 2. Increment Usage Count in Database
+    // Increment Daily Usage
     await supabase.from("user_daily_usage").upsert({
       user_id: activeUserId,
       usage_date: today,
@@ -143,10 +162,22 @@ serve(async (req) => {
       updated_at: new Date().toISOString(),
     }, { onConflict: "user_id, usage_date" });
 
-    // 3. Create or Update Conversation Session in Database
+    // Web Browsing Extraction
+    let webContext = "";
+    const urlMatches = message.match(/https?:\/\/[^\s]+/g);
+    if (urlMatches && urlMatches.length > 0) {
+      const targetUrl = urlMatches[0];
+      const pageText = await browseWebpage(targetUrl);
+      if (pageText) {
+        webContext = `\n\n[LIVE BROWSED CONTENT FROM ${targetUrl}]:\n${pageText}\n`;
+      }
+    }
+
+    // Manage Conversation ID
     let convId = conversation_id;
+    const initialText = message || `Review attached ${attachment?.name || "document"}`;
     if (!convId) {
-      const title = message.length > 35 ? message.substring(0, 35) + "..." : message;
+      const title = initialText.length > 35 ? initialText.substring(0, 35) + "..." : initialText;
       const { data: newConv } = await supabase
         .from("conversations")
         .insert({ title, jurisdiction, user_id: activeUserId })
@@ -160,54 +191,65 @@ serve(async (req) => {
         .eq("id", convId);
     }
 
-    // 4. Save User Message in Database
+    // Save user message in DB
     if (convId) {
+      const displayMsg = attachment 
+        ? `${message}\n\n📎 *Attached file: ${attachment.name}*`
+        : message;
       await supabase.from("messages").insert({
         conversation_id: convId,
         role: "user",
-        content: message,
+        content: displayMsg,
       });
     }
 
-    // 5. Search Statutory Knowledge Base (RAG)
+    // Search Knowledge Library (RAG)
     let legalContext = "";
     try {
       const { data: matches } = await supabase.rpc("search_statutory_library", {
-        query_text: message,
+        query_text: message || attachment?.name || "contract review",
         p_jurisdiction: jurisdiction.toLowerCase().includes("nigeria") ? "nigeria" : "us",
         match_limit: 3,
       });
       if (matches && matches.length > 0) {
-        legalContext = matches.map((m: any) => `[${m.document_title}] ${m.content}`).join("\n\n---\n\n");
+        legalContext = matches.map((m: any) => `[DOCUMENT SOURCE: ${m.document_title}]\n${m.content}`).join("\n\n---\n\n");
       }
     } catch { /* silent */ }
 
-    // System Prompt for Interactive Intake
-    const systemPrompt = `You are Lex AI, a seasoned Nigerian & US legal practitioner acting as an interactive client-consultant.
+    // STRICT SYSTEM PROMPT: Dynamic Intake with Citations & Sources Enforced
+    const systemPrompt = `You are Lex AI, a senior legal practitioner and multijurisdictional legal intelligence assistant.
 
 JURISDICTION: ${jurisdiction}
 
-YOUR ABSOLUTE MANDATE:
-You are conducting a strict, sequential client intake interview. You are FORBIDDEN from giving a final legal opinion, structured analysis, or IRAC block in your early responses. You must ALWAYS guide the client by asking targeted follow-up questions first.
+YOUR INTENSITY RULES:
+You conduct structured legal intakes. Never provide a final legal conclusion or structured analysis in your first turn if key factual details are missing. Always guide the client by asking 1-2 focused follow-up questions first.
 
-THE INTAKE RULES (MANDATORY):
-1. ALWAYS ASK FOLLOW-UP QUESTIONS: Every single response you make MUST contain 1 to 2 targeted follow-up questions to gather necessary context.
-2. DO NOT ANSWER YET: Explain what legal issue you are investigating and ask a clarifying question about it.
-3. CONVERSATIONAL PACE: Ask only 1 or 2 questions at a time.
-4. GATHER THE FOLLOWING CONTEXT:
-   - What exact corporate or legal structure is involved?
-   - When did the events occur (dates/timeline)?
-   - Are there written contracts, deeds, receipts, emails, or WhatsApp communications?
-   - What specific outcome, remedy, or protection is the user trying to achieve?
+THE INTAKE PROTOCOL:
+- If critical details (CAMA corporate structure, exact dates, monetary values, written agreements) are unknown, politely explain why they matter and ask your clarifying questions.
+- Once all facts are gathered, transition into a complete, formal legal analysis.
 
-EXCEPTIONS (FULL ANALYSIS):
-Only provide your final structured analysis (with Issues, Applicable Laws, Analysis, and Next Steps) if:
-- The user explicitly requests: "Give me the final analysis" OR "Provide your final opinion now."
-- OR you have conducted at least 3 to 4 turns of follow-up questions and collected all necessary facts.
+STRICT CITATION DIRECTIVE (For Final Analysis):
+When delivering a full legal analysis, you MUST provide explicit citations:
+1. INLINE CITATIONS: For every statutory rule or precedent you mention, cite the exact act and section directly within the sentence (e.g., "...under Section 305 of the Companies and Allied Matters Act (CAMA) 2020..." or "...as established in the US Uniform Commercial Code, Article 2-201...").
+2. SOURCES CITED SECTION: At the very bottom of your final analysis, list a structured directory of all sources consulted. This must include:
+   - Specific Acts or Constitutions (e.g. 1999 Constitution of Nigeria, Section 36)
+   - Judicial precedents/Case Law citations
+   - Uploaded PDF/Image document names (if provided)
+   - Live web links analyzed (if provided)
+
+STRUCTURE FOR FINAL LEGAL ANALYSIS:
+### 1. LEGAL ISSUES IDENTIFIED
+### 2. APPLICABLE LAWS & STATUTORY RULES (WITH CITATIONS)
+### 3. LEGAL ANALYSIS & DOCUMENT AUDIT
+### 4. STRATEGIC OPTIONS & RECOMMENDED NEXT STEPS
+### 5. SOURCES CITED
+- [List exact acts, sections, judgments, and provided references here]
 
 ***
 ⚖️ *Lex AI provides legal information, not legal representation. Verify important legal advice and citations with a qualified lawyer.*
 
+${webContext}
+${attachment?.extractedText ? `\n\n[EXTRACTED ATTACHMENT TEXT (${attachment.name})]:\n${attachment.extractedText}\n` : ""}
 ${legalContext ? `\nRELEVANT STATUTORY REFERENCES:\n${legalContext}` : ""}`;
 
     const chatMessages: any[] = [{ role: "system", content: systemPrompt }];
@@ -221,33 +263,52 @@ ${legalContext ? `\nRELEVANT STATUTORY REFERENCES:\n${legalContext}` : ""}`;
           });
         }
       });
-    } else {
-      chatMessages.push({ role: "user", content: message });
     }
 
-    // Active Groq Production Models
-    const activeModels = [
-      "llama-3.1-8b-instant",
-      "openai/gpt-oss-20b",
-      "openai/gpt-oss-120b"
-    ];
+    const isImage = attachment && attachment.type === "image" && attachment.base64;
+    let selectedModel = isImage ? "llama-3.2-11b-vision-preview" : "llama-3.1-8b-instant";
+
+    if (isImage) {
+      chatMessages.push({
+        role: "user",
+        content: [
+          { type: "text", text: message || "Please review and analyze this attached legal document / image." },
+          {
+            type: "image_url",
+            image_url: {
+              url: `data:${attachment.mimeType || "image/jpeg"};base64,${attachment.base64}`,
+            },
+          },
+        ],
+      });
+    } else {
+      chatMessages.push({
+        role: "user",
+        content: message || `Please review the attached document: ${attachment?.name || ""}`,
+      });
+    }
+
+    const candidateModels = isImage 
+      ? ["llama-3.2-11b-vision-preview", "llama-3.1-8b-instant"]
+      : ["llama-3.1-8b-instant", "openai/gpt-oss-20b"];
 
     let reply = "";
     let lastError: any = null;
 
-    for (const modelName of activeModels) {
+    for (const modelName of candidateModels) {
       try {
         const completion = await groq.chat.completions.create({
           model: modelName,
           messages: chatMessages,
-          temperature: 0.1,
-          max_tokens: 1500,
+          temperature: 0.2, // Low temperature enforces strict citation guidelines
+          max_tokens: 2000,
         });
 
         reply = completion.choices[0]?.message?.content || "";
         if (reply) break;
       } catch (err: any) {
         lastError = err;
+        console.warn(`Model ${modelName} failed. Trying fallback...`);
       }
     }
 
@@ -255,7 +316,7 @@ ${legalContext ? `\nRELEVANT STATUTORY REFERENCES:\n${legalContext}` : ""}`;
       throw lastError || new Error("All AI inference models failed.");
     }
 
-    // 6. Save Assistant Reply to Database
+    // Save assistant reply to DB
     if (convId) {
       await supabase.from("messages").insert({
         conversation_id: convId,
@@ -264,8 +325,6 @@ ${legalContext ? `\nRELEVANT STATUTORY REFERENCES:\n${legalContext}` : ""}`;
       });
     }
 
-    const updatedRemaining = Math.max(0, DAILY_LIMIT - (usedSoFar + 1));
-
     return new Response(
       JSON.stringify({
         response: reply,
@@ -273,7 +332,7 @@ ${legalContext ? `\nRELEVANT STATUTORY REFERENCES:\n${legalContext}` : ""}`;
         usage: {
           count: usedSoFar + 1,
           limit: DAILY_LIMIT,
-          remaining: updatedRemaining,
+          remaining: Math.max(0, DAILY_LIMIT - (usedSoFar + 1)),
         }
       }),
       { headers: corsHeaders }
@@ -281,7 +340,7 @@ ${legalContext ? `\nRELEVANT STATUTORY REFERENCES:\n${legalContext}` : ""}`;
   } catch (error: any) {
     console.error("Chat Error:", error);
     return new Response(
-      JSON.stringify({ error: `AI Assistant Error: ${error.message || "Failed to process inquiry"}` }),
+      JSON.stringify({ error: `AI Assistant Error: ${error.message || "Failed to process request"}` }),
       { status: 500, headers: corsHeaders }
     );
   }
