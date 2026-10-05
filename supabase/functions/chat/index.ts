@@ -44,20 +44,32 @@ async function browseWebpage(url: string): Promise<string> {
 }
 
 // Voice Note Transcriber via Groq Whisper (< 300ms)
-async function transcribeAudio(base64Data: string, mimeType: string, fileName: string, groqApiKey: string): Promise<string> {
+async function transcribeAudio(base64Data: string, mimeType: string, groqApiKey: string): Promise<string> {
   try {
-    const binaryStr = atob(base64Data);
-    const len = binaryStr.length;
-    const bytes = new Uint8Array(len);
-    for (let i = 0; i < len; i++) {
+    const cleanBase64 = base64Data.replace(/\s/g, '');
+    const binaryStr = atob(cleanBase64);
+    const bytes = new Uint8Array(binaryStr.length);
+    for (let i = 0; i < binaryStr.length; i++) {
       bytes[i] = binaryStr.charCodeAt(i);
+    }
+
+    let ext = 'webm';
+    if (mimeType.includes('mp4') || mimeType.includes('m4a') || mimeType.includes('aac')) {
+      ext = 'm4a';
+    } else if (mimeType.includes('wav')) {
+      ext = 'wav';
+    } else if (mimeType.includes('mp3') || mimeType.includes('mpeg')) {
+      ext = 'mp3';
+    } else if (mimeType.includes('ogg')) {
+      ext = 'ogg';
     }
 
     const audioBlob = new Blob([bytes], { type: mimeType || 'audio/webm' });
     const formData = new FormData();
-    formData.append('file', audioBlob, fileName || 'voicenote.webm');
+    formData.append('file', audioBlob, `audio.${ext}`);
     formData.append('model', 'whisper-large-v3-turbo');
     formData.append('response_format', 'json');
+    formData.append('temperature', '0.0');
 
     const res = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
       method: 'POST',
@@ -69,15 +81,16 @@ async function transcribeAudio(base64Data: string, mimeType: string, fileName: s
 
     if (!res.ok) {
       const errText = await res.text();
-      console.error("Groq Whisper error:", errText);
-      return "[Voice transcription unavailable]";
+      console.error("[WHISPER TRANSCRIPTION ERROR]:", errText);
+      return "";
     }
 
     const data = await res.json();
-    return data.text || "";
+    console.log("[WHISPER TRANSCRIPTION SUCCESS]:", data.text);
+    return data.text ? data.text.trim() : "";
   } catch (err: any) {
-    console.error("Audio transcription error:", err.message);
-    return "[Voice transcription error]";
+    console.error("[AUDIO PROCESSING EXCEPTION]:", err.message);
+    return "";
   }
 }
 
@@ -164,12 +177,15 @@ serve(async (req) => {
 
     const activeUserId = user_id || headerUserId || "public_user";
 
-    // Transcribe audio / voice note if attached
+    // TRANSCRIBE AUDIO VOICE NOTE
     let audioTranscript = "";
     if (attachment && attachment.type === "audio" && attachment.base64) {
-      audioTranscript = await transcribeAudio(attachment.base64, attachment.mimeType, attachment.name, groqKey);
+      audioTranscript = await transcribeAudio(attachment.base64, attachment.mimeType, groqKey);
       if (audioTranscript && audioTranscript.trim().length > 0) {
-        message = message ? `${message}\n\n[Spoken Voice Note]: "${audioTranscript}"` : audioTranscript;
+        // Replace empty or placeholder message with the real spoken text
+        message = message && !message.includes("Transcribing voice note")
+          ? `${message}\n\n[Spoken Voice Note]: "${audioTranscript}"`
+          : audioTranscript;
       }
     }
 
@@ -223,7 +239,7 @@ serve(async (req) => {
 
     // Conversation management
     let convId = conversation_id;
-    const initialText = message || `Review attached ${attachment?.name || "document"}`;
+    const initialText = audioTranscript || message || `Review attached ${attachment?.name || "document"}`;
     if (!convId) {
       const title = initialText.length > 35 ? initialText.substring(0, 35) + "..." : initialText;
       const { data: newConv } = await supabase
@@ -239,11 +255,11 @@ serve(async (req) => {
         .eq("id", convId);
     }
 
-    // Save user message in DB
+    // Save user message in DB with actual transcript
     if (convId) {
       let displayMsg = message;
       if (attachment && attachment.type === 'audio') {
-        displayMsg = `🎙️ *Voice Note:* "${audioTranscript || 'Audio attachment'}"${message && message !== audioTranscript ? `\n\n${message}` : ''}`;
+        displayMsg = `🎙️ *Voice Note:* "${audioTranscript || 'Audio recording'}"${message && message !== audioTranscript ? `\n\n${message}` : ''}`;
       } else if (attachment) {
         displayMsg = `${message}\n\n📎 *Attached: ${attachment.name}*`;
       }
@@ -259,7 +275,7 @@ serve(async (req) => {
     let legalContext = "";
     try {
       const { data: matches } = await supabase.rpc("search_statutory_library", {
-        query_text: message || attachment?.name || "contract review",
+        query_text: audioTranscript || message || attachment?.name || "contract review",
         p_jurisdiction: jurisdiction.toLowerCase().includes("nigeria") ? "nigeria" : "us",
         match_limit: 3,
       });
@@ -273,15 +289,12 @@ serve(async (req) => {
     // SYSTEM PROMPT
     const systemPrompt = `You are Lex AI, a senior legal counsel and multimodal legal intelligence assistant specializing in ${jurisdiction}.
 
-CAPABILITIES:
-1. VOICE NOTE INTERPRETATION: You can listen to and process transcribed user voice recordings. Treat them with the same legal rigor as written questions.
-2. DOCUMENT & PDF AUDITING: Review uploaded contracts, identifying loopholes, liabilities, and statutory compliance.
-3. VISUAL INSPECTION: Inspect images of signed documents, receipts, or property evidence.
-4. WEB RESEARCH: Analyze live browsed webpage contents.
+IMPORTANT INSTRUCTION FOR VOICE NOTES:
+When the user sends a voice note, it is transcribed into text. Treat their spoken words as their direct question or statement. Never ask the user to type it out or re-transcribe it.
 
 OPERATIONAL RULES:
 1. DRAFTING & DIRECT QUESTIONS:
-If the user asks to draft a contract, review an attachment, or asks an informational question, answer or draft IMMEDIATELY without asking unnecessary questions.
+If the user asks an informational question (e.g. "What is law?", "Explain Section 305 CAMA", "Draft an NDA"), answer or draft IMMEDIATELY and thoroughly.
 
 2. NEW COMPLEX LEGAL DISPUTES (FIRST TURN ONLY):
 If the user describes a fresh legal problem that requires specific facts:
@@ -289,14 +302,14 @@ If the user describes a fresh legal problem that requires specific facts:
 - Give a brief 2-sentence initial legal overview.
 - List ALL the questions you need in ONE single clear, numbered list (maximum 3-4 questions).
 - Inform the user: "Once you share these details, I will provide your complete legal analysis and action plan."
-- NEVER ask questions in a loop!
 
-3. SECOND TURN / AFTER USER REPLIES (PROCEED IMMEDIATELY):
-${isFollowUpTurn ? "CRITICAL: The user is now providing details. PROCEED IMMEDIATELY TO THE COMPLETE LEGAL ANALYSIS. DO NOT ASK ANY MORE QUESTIONS." : "Once the user provides details on the next turn, proceed directly to the full analysis without asking another round of questions."}
+3. SECOND TURN / AFTER USER REPLIES:
+${isFollowUpTurn ? "The user is now providing details. PROCEED IMMEDIATELY TO THE COMPLETE LEGAL ANALYSIS. DO NOT ASK ANY MORE QUESTIONS." : "Once the user provides details on the next turn, proceed directly to the full analysis without asking another round of questions."}
 
-STRUCTURE OF FULL LEGAL ANALYSIS:
+STRUCTURE OF FULL LEGAL ANALYSIS (WHEN DELIVERING OPINION):
 ### 1. LEGAL ISSUES IDENTIFIED
 ### 2. APPLICABLE LAWS & STATUTES (WITH CITATIONS)
+[Cite exact sections from relevant Acts, e.g., CAMA 2020 Sec. 305, 1999 Constitution, or relevant case precedents under ${jurisdiction}]
 ### 3. LEGAL ANALYSIS
 ### 4. STRATEGIC OPTIONS & RECOMMENDED NEXT STEPS
 ### 5. SOURCES CITED
@@ -311,17 +324,23 @@ ${legalContext ? `\nRELEVANT STATUTORY REFERENCES:\n${legalContext}` : ""}`;
 
     const chatMessages: any[] = [{ role: "system", content: systemPrompt }];
 
+    // Build chat history and replace any placeholder with the real transcribed text
     if (Array.isArray(messages) && messages.length > 0) {
-      messages.forEach((m: any) => {
+      messages.forEach((m: any, idx: number) => {
         if (m.content) {
+          let content = m.content;
+          // If this is the last message and contains a placeholder, replace with real transcript
+          if (idx === messages.length - 1 && audioTranscript) {
+            content = audioTranscript;
+          }
           chatMessages.push({
             role: m.role === "assistant" ? "assistant" : "user",
-            content: m.content,
+            content: content,
           });
         }
       });
     } else {
-      chatMessages.push({ role: "user", content: message });
+      chatMessages.push({ role: "user", content: audioTranscript || message });
     }
 
     const isImage = attachment && attachment.type === "image" && attachment.base64;
