@@ -239,7 +239,7 @@ const LexAI: React.FC = () => {
     navigate('/auth');
   };
 
-  // ==================== LIVE VOICE RECORDER ====================
+  // Live Voice Recording
   const startVoiceRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -821,7 +821,7 @@ const LexAI: React.FC = () => {
         )}
       </div>
 
-      {/* ==================== INPUT DOCK WITH LIVE VOICE RECORDER ==================== */}
+      {/* INPUT DOCK WITH LIVE VOICE RECORDER */}
       <div className="shrink-0 px-3 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-white dark:bg-[#171717] border-t border-slate-200/50 dark:border-white/5 z-30">
         <div className="max-w-3xl mx-auto">
           
