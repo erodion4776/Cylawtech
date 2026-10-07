@@ -2,420 +2,522 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.8";
 import Groq from "https://esm.sh/groq-sdk@0.5.0";
 
-const DAILY_LIMIT = 10;
-
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-user-id",
-  "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type, x-api-key, x-admin-key",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Content-Type": "application/json",
 };
 
-// Web Browsing Helper
-async function browseWebpage(url: string): Promise<string> {
+const groqApiKey = Deno.env.get("GROQ_API_KEY") || "";
+const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
+const supabaseServiceKey =
+  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+
+const groq = new Groq({
+  apiKey: groqApiKey,
+});
+
+const supabase = createClient(
+  supabaseUrl,
+  supabaseServiceKey
+);
+
+// ============================================================
+// LEXAI EMBEDDING MODEL
+// IMPORTANT:
+// This MUST match the model used to create the existing
+// 384-dimensional knowledge_chunks embeddings.
+// ============================================================
+
+// @ts-ignore
+const embeddingModel = new Supabase.ai.Session("gte-small");
+
+// ============================================================
+// Generate a 384-dimensional embedding using the SAME model
+// used by the existing legal knowledge base.
+// ============================================================
+
+async function getEmbedding(
+  text: string
+): Promise<number[] | null> {
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 6000);
-
-    const res = await fetch(url, {
-      signal: controller.signal,
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,text/plain",
-      }
-    });
-    clearTimeout(timeout);
-
-    if (!res.ok) return `[Web browsing failed: HTTP status ${res.status}]`;
-
-    const html = await res.text();
-    const cleanText = html
-      .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
-      .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, "")
-      .replace(/<[^>]+>/g, " ")
+    const cleanedText = text
       .replace(/\s+/g, " ")
-      .trim();
+      .trim()
+      .substring(0, 1000);
 
-    return cleanText.substring(0, 4000);
-  } catch (err: any) {
-    console.warn("Web browsing error:", err.message);
-    return "";
-  }
-}
-
-// Voice Note Transcriber via Groq Whisper (< 300ms)
-async function transcribeAudio(base64Data: string, mimeType: string, groqApiKey: string): Promise<string> {
-  try {
-    const cleanBase64 = base64Data.replace(/\s/g, '');
-    const binaryStr = atob(cleanBase64);
-    const bytes = new Uint8Array(binaryStr.length);
-    for (let i = 0; i < binaryStr.length; i++) {
-      bytes[i] = binaryStr.charCodeAt(i);
+    if (!cleanedText) {
+      return null;
     }
 
-    let ext = 'webm';
-    if (mimeType.includes('mp4') || mimeType.includes('m4a') || mimeType.includes('aac')) {
-      ext = 'm4a';
-    } else if (mimeType.includes('wav')) {
-      ext = 'wav';
-    } else if (mimeType.includes('mp3') || mimeType.includes('mpeg')) {
-      ext = 'mp3';
-    } else if (mimeType.includes('ogg')) {
-      ext = 'ogg';
-    }
-
-    const audioBlob = new Blob([bytes], { type: mimeType || 'audio/webm' });
-    const formData = new FormData();
-    formData.append('file', audioBlob, `audio.${ext}`);
-    formData.append('model', 'whisper-large-v3-turbo');
-    formData.append('response_format', 'json');
-    formData.append('temperature', '0.0');
-
-    const res = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${groqApiKey}`,
-      },
-      body: formData,
+    // @ts-ignore
+    const rawEmbedding = await embeddingModel.run(cleanedText, {
+      mean_pool: true,
+      normalize: true,
     });
 
-    if (!res.ok) {
-      const errText = await res.text();
-      console.error("[WHISPER TRANSCRIPTION ERROR]:", errText);
-      return "";
+    const embedding = Array.from(rawEmbedding) as number[];
+
+    if (embedding.length !== 384) {
+      console.error(
+        `Unexpected embedding dimension: ${embedding.length}`
+      );
+
+      return null;
     }
 
-    const data = await res.json();
-    console.log("[WHISPER TRANSCRIPTION SUCCESS]:", data.text);
-    return data.text ? data.text.trim() : "";
-  } catch (err: any) {
-    console.error("[AUDIO PROCESSING EXCEPTION]:", err.message);
-    return "";
+    return embedding;
+  } catch (error) {
+    console.error(
+      "LexAI embedding generation error:",
+      error
+    );
+
+    return null;
   }
 }
+
+// ============================================================
+// Format retrieved legal sources for the language model
+// ============================================================
+
+function formatLegalContext(matches: any[]): string {
+  if (!matches || matches.length === 0) {
+    return "";
+  }
+
+  return matches
+    .map((m, index) => {
+      const metadata = [
+        `SOURCE ${index + 1}`,
+        `Document: ${m.document_title}`,
+        `Jurisdiction: ${m.jurisdiction || "Unknown"}`,
+        `Document Type: ${m.document_type || "Unknown"}`,
+        `Authority Level: ${m.authority_level || "Unclassified"}`,
+        `Current Status: ${m.current_status || "Unverified"}`,
+        `Version: ${m.version_label || "Unknown"}`,
+        `Section: ${m.section_number || "Not specified"}`,
+        `Subsection: ${m.subsection || "Not specified"}`,
+        `Source Locator: ${m.source_locator || "Not specified"}`,
+        `Similarity: ${
+          typeof m.similarity === "number"
+            ? m.similarity.toFixed(4)
+            : "N/A"
+        }`,
+      ].join("\n");
+
+      return `${metadata}
+
+CONTENT:
+${m.content}`;
+    })
+    .join("\n\n==============================\n\n");
+}
+
+// ============================================================
+// Determine whether the question needs heightened verification
+// ============================================================
+
+function requiresVerification(message: string): boolean {
+  const text = message.toLowerCase();
+
+  const verificationTerms = [
+    "current law",
+    "currently",
+    "latest law",
+    "today",
+    "2026",
+    "amended",
+    "amendment",
+    "repealed",
+    "repeal",
+    "valid",
+    "still in force",
+    "in force",
+    "effective",
+    "deadline",
+    "limitation",
+    "procedure",
+    "filing",
+    "appeal",
+    "bail",
+    "arrest",
+    "criminal",
+    "constitutional",
+    "court",
+    "judge",
+    "judgment",
+    "case",
+    "precedent",
+    "statutory",
+  ];
+
+  return verificationTerms.some((term) =>
+    text.includes(term)
+  );
+}
+
+// ============================================================
+// Main handler
+// ============================================================
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
+    return new Response("ok", {
+      headers: corsHeaders,
+    });
   }
 
   try {
-    const groqKey = Deno.env.get("GROQ_API_KEY");
-    if (!groqKey) {
-      return new Response(
-        JSON.stringify({ error: "Configuration Error: GROQ_API_KEY is missing." }),
-        { status: 500, headers: corsHeaders }
-      );
-    }
-
-    const groq = new Groq({ apiKey: groqKey });
-    const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
-    const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
-    const supabase = createClient(supabaseUrl, supabaseKey);
-
-    const url = new URL(req.url);
-    const action = url.searchParams.get("action") || "send";
-    const headerUserId = req.headers.get("x-user-id");
-
-    // 1. List
-    if (action === "list") {
-      const targetUser = url.searchParams.get("user_id") || headerUserId || "public_user";
-      const { data } = await supabase
-        .from("conversations")
-        .select("id, title, jurisdiction, mode, updated_at")
-        .eq("user_id", targetUser)
-        .order("updated_at", { ascending: false })
-        .limit(50);
-
-      const today = new Date().toISOString().split("T")[0];
-      const { data: usageData } = await supabase
-        .from("user_daily_usage")
-        .select("count")
-        .eq("user_id", targetUser)
-        .eq("usage_date", today)
-        .maybeSingle();
-
-      const currentCount = usageData?.count || 0;
-
-      return new Response(
-        JSON.stringify({ 
-          conversations: data || [],
-          usage: { count: currentCount, limit: DAILY_LIMIT, remaining: Math.max(0, DAILY_LIMIT - currentCount) }
-        }), 
-        { headers: corsHeaders }
-      );
-    }
-
-    // 2. History
-    if (action === "history") {
-      const { conversation_id } = await req.json();
-      const { data } = await supabase
-        .from("messages")
-        .select("id, role, content, created_at")
-        .eq("conversation_id", conversation_id)
-        .order("created_at", { ascending: true });
-      return new Response(JSON.stringify({ messages: data || [] }), { headers: corsHeaders });
-    }
-
-    // 3. Delete
-    if (action === "delete") {
-      const { conversation_id } = await req.json();
-      await supabase.from("conversations").delete().eq("id", conversation_id);
-      return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
-    }
-
-    // 4. Send Message (Multimodal + Audio Transcription)
     const body = await req.json();
-    let {
-      message = "",
-      messages = [],
-      conversation_id,
+
+    const {
+      message,
       jurisdiction = "Nigerian Law",
-      user_id = "public_user",
-      attachment,
+      stage = "prep",
+      editorContent = "",
     } = body;
 
-    const activeUserId = user_id || headerUserId || "public_user";
-
-    // TRANSCRIBE AUDIO VOICE NOTE
-    let audioTranscript = "";
-    if (attachment && attachment.type === "audio" && attachment.base64) {
-      audioTranscript = await transcribeAudio(attachment.base64, attachment.mimeType, groqKey);
-      if (audioTranscript && audioTranscript.trim().length > 0) {
-        // Replace empty or placeholder message with the real spoken text
-        message = message && !message.includes("Transcribing voice note")
-          ? `${message}\n\n[Spoken Voice Note]: "${audioTranscript}"`
-          : audioTranscript;
-      }
-    }
-
-    if ((!message || message.trim() === "") && !attachment) {
-      return new Response(JSON.stringify({ error: "Please provide a legal inquiry, upload a document, or record a voice note." }), {
-        status: 400,
-        headers: corsHeaders,
-      });
-    }
-
-    // Rate Limit Check
-    const today = new Date().toISOString().split("T")[0];
-    const { data: currentUsage } = await supabase
-      .from("user_daily_usage")
-      .select("count")
-      .eq("user_id", activeUserId)
-      .eq("usage_date", today)
-      .maybeSingle();
-
-    const usedSoFar = currentUsage?.count || 0;
-
-    if (usedSoFar >= DAILY_LIMIT) {
+    if (!message || typeof message !== "string") {
       return new Response(
-        JSON.stringify({ 
-          error: "Daily Inquiry Limit Reached. Please upgrade or try again tomorrow.",
-          paywall: true,
-          usage: { count: usedSoFar, limit: DAILY_LIMIT, remaining: 0 }
+        JSON.stringify({
+          error: "Please enter a legal inquiry.",
         }),
-        { status: 429, headers: corsHeaders }
+        {
+          status: 400,
+          headers: corsHeaders,
+        }
       );
     }
 
-    // Increment Usage
-    await supabase.from("user_daily_usage").upsert({
-      user_id: activeUserId,
-      usage_date: today,
-      count: usedSoFar + 1,
-      updated_at: new Date().toISOString(),
-    }, { onConflict: "user_id, usage_date" });
+    // ========================================================
+    // 1. Platform status
+    // ========================================================
 
-    // Web browsing extraction
-    let webContext = "";
-    const urlMatches = message.match(/https?:\/\/[^\s]+/g);
-    if (urlMatches && urlMatches.length > 0) {
-      const targetUrl = urlMatches[0];
-      const pageText = await browseWebpage(targetUrl);
-      if (pageText) {
-        webContext = `\n\n[LIVE BROWSED CONTENT FROM ${targetUrl}]:\n${pageText}\n`;
-      }
-    }
-
-    // Conversation management
-    let convId = conversation_id;
-    const initialText = audioTranscript || message || `Review attached ${attachment?.name || "document"}`;
-    if (!convId) {
-      const title = initialText.length > 35 ? initialText.substring(0, 35) + "..." : initialText;
-      const { data: newConv } = await supabase
-        .from("conversations")
-        .insert({ title, jurisdiction, user_id: activeUserId })
-        .select()
-        .single();
-      if (newConv) convId = newConv.id;
-    } else {
+    const { data: settings, error: settingsError } =
       await supabase
-        .from("conversations")
-        .update({ updated_at: new Date().toISOString(), jurisdiction })
-        .eq("id", convId);
-    }
+        .from("settings")
+        .select("*")
+        .single();
 
-    // Save user message in DB with actual transcript
-    if (convId) {
-      let displayMsg = message;
-      if (attachment && attachment.type === 'audio') {
-        displayMsg = `🎙️ *Voice Note:* "${audioTranscript || 'Audio recording'}"${message && message !== audioTranscript ? `\n\n${message}` : ''}`;
-      } else if (attachment) {
-        displayMsg = `${message}\n\n📎 *Attached: ${attachment.name}*`;
-      }
-
-      await supabase.from("messages").insert({
-        conversation_id: convId,
-        role: "user",
-        content: displayMsg,
-      });
-    }
-
-    // Search knowledge library (RAG)
-    let legalContext = "";
-    try {
-      const { data: matches } = await supabase.rpc("search_statutory_library", {
-        query_text: audioTranscript || message || attachment?.name || "contract review",
-        p_jurisdiction: jurisdiction.toLowerCase().includes("nigeria") ? "nigeria" : "us",
-        match_limit: 3,
-      });
-      if (matches && matches.length > 0) {
-        legalContext = matches.map((m: any) => `[DOCUMENT SOURCE: ${m.document_title}]\n${m.content}`).join("\n\n---\n\n");
-      }
-    } catch { /* silent */ }
-
-    const isFollowUpTurn = Array.isArray(messages) && messages.length >= 2;
-
-    // SYSTEM PROMPT
-    const systemPrompt = `You are Lex AI, a senior legal counsel and multimodal legal intelligence assistant specializing in ${jurisdiction}.
-
-IMPORTANT INSTRUCTION FOR VOICE NOTES:
-When the user sends a voice note, it is transcribed into text. Treat their spoken words as their direct question or statement. Never ask the user to type it out or re-transcribe it.
-
-OPERATIONAL RULES:
-1. DRAFTING & DIRECT QUESTIONS:
-If the user asks an informational question (e.g. "What is law?", "Explain Section 305 CAMA", "Draft an NDA"), answer or draft IMMEDIATELY and thoroughly.
-
-2. NEW COMPLEX LEGAL DISPUTES (FIRST TURN ONLY):
-If the user describes a fresh legal problem that requires specific facts:
-- Acknowledge their situation with professional empathy.
-- Give a brief 2-sentence initial legal overview.
-- List ALL the questions you need in ONE single clear, numbered list (maximum 3-4 questions).
-- Inform the user: "Once you share these details, I will provide your complete legal analysis and action plan."
-
-3. SECOND TURN / AFTER USER REPLIES:
-${isFollowUpTurn ? "The user is now providing details. PROCEED IMMEDIATELY TO THE COMPLETE LEGAL ANALYSIS. DO NOT ASK ANY MORE QUESTIONS." : "Once the user provides details on the next turn, proceed directly to the full analysis without asking another round of questions."}
-
-STRUCTURE OF FULL LEGAL ANALYSIS (WHEN DELIVERING OPINION):
-### 1. LEGAL ISSUES IDENTIFIED
-### 2. APPLICABLE LAWS & STATUTES (WITH CITATIONS)
-[Cite exact sections from relevant Acts, e.g., CAMA 2020 Sec. 305, 1999 Constitution, or relevant case precedents under ${jurisdiction}]
-### 3. LEGAL ANALYSIS
-### 4. STRATEGIC OPTIONS & RECOMMENDED NEXT STEPS
-### 5. SOURCES CITED
-- [List exact Acts, Sections, Case Law, and documents consulted]
-
-***
-⚖️ *Lex AI provides legal information, not legal representation. Verify important legal advice and citations with a qualified lawyer.*
-
-${webContext}
-${attachment?.extractedText ? `\n\n[ATTACHED DOCUMENT CONTENT (${attachment.name})]:\n${attachment.extractedText}\n` : ""}
-${legalContext ? `\nRELEVANT STATUTORY REFERENCES:\n${legalContext}` : ""}`;
-
-    const chatMessages: any[] = [{ role: "system", content: systemPrompt }];
-
-    // Build chat history and replace any placeholder with the real transcribed text
-    if (Array.isArray(messages) && messages.length > 0) {
-      messages.forEach((m: any, idx: number) => {
-        if (m.content) {
-          let content = m.content;
-          // If this is the last message and contains a placeholder, replace with real transcript
-          if (idx === messages.length - 1 && audioTranscript) {
-            content = audioTranscript;
-          }
-          chatMessages.push({
-            role: m.role === "assistant" ? "assistant" : "user",
-            content: content,
-          });
+    if (
+      !settingsError &&
+      settings &&
+      settings.api_enabled === false
+    ) {
+      return new Response(
+        JSON.stringify({
+          error:
+            "LexAI Workspace is temporarily undergoing scheduled maintenance. Please try again shortly.",
+        }),
+        {
+          status: 503,
+          headers: corsHeaders,
         }
-      });
-    } else {
-      chatMessages.push({ role: "user", content: audioTranscript || message });
+      );
     }
 
-    const isImage = attachment && attachment.type === "image" && attachment.base64;
-    let selectedModel = isImage ? "llama-3.2-11b-vision-preview" : "llama-3.1-8b-instant";
+    // ========================================================
+    // 2. Normalize jurisdiction
+    // ========================================================
 
-    if (isImage) {
-      chatMessages.push({
-        role: "user",
-        content: [
-          { type: "text", text: message || "Please review and analyze this attached legal document / image." },
+    const normalizedJurisdiction =
+      jurisdiction.toLowerCase().includes("nigeria")
+        ? "nigeria"
+        : jurisdiction.toLowerCase().includes("federal")
+        ? "us_federal"
+        : jurisdiction.toLowerCase();
+
+    // ========================================================
+    // 3. Generate query embedding
+    // ========================================================
+
+    const embedding = await getEmbedding(message);
+
+    let matches: any[] = [];
+    let retrievalError: string | null = null;
+
+    // ========================================================
+    // 4. Search the ACTUAL legal knowledge base
+    // ========================================================
+
+    if (embedding) {
+      const { data, error } = await supabase.rpc(
+        "match_legal_chunks",
+        {
+          query_embedding: embedding,
+          match_threshold: 0.20,
+          match_count: 8,
+          p_jurisdiction: normalizedJurisdiction,
+        }
+      );
+
+      if (error) {
+        console.error(
+          "Legal retrieval error:",
+          error
+        );
+
+        retrievalError =
+          "The legal knowledge retrieval service failed.";
+      } else if (data) {
+        matches = data;
+      }
+    } else {
+      retrievalError =
+        "The legal query could not be embedded.";
+    }
+
+    // ========================================================
+    // 5. Build legal context
+    // ========================================================
+
+    const legalContext =
+      formatLegalContext(matches);
+
+    const verificationRequired =
+      requiresVerification(message);
+
+    // ========================================================
+    // 6. Stage directive
+    // ========================================================
+
+    let stageDirective = "";
+
+    if (stage === "prep") {
+      stageDirective =
+        "Focus on issue identification, legal classification, IRAC analysis, and careful application of the law.";
+    } else if (stage === "training") {
+      stageDirective = `Review and critique the user's draft:
+
+"""${editorContent || "No draft provided"}"""
+
+Focus on statutory precision, legal reasoning, authority, jurisdiction, exceptions, and professional legal language.`;
+    } else if (stage === "practice") {
+      stageDirective =
+        "Draft precise legal clauses, contract terms, pleadings, or memorandum sections where appropriate.";
+    }
+
+    // ========================================================
+    // 7. Legal research system prompt
+    // ========================================================
+
+    const systemPrompt = `
+You are LexAI, a legal research and legal-analysis assistant.
+
+You are NOT permitted to invent statutes, sections, cases,
+court decisions, procedural requirements, dates, authorities,
+or quotations.
+
+JURISDICTION:
+${jurisdiction}
+
+NORMALIZED JURISDICTION:
+${normalizedJurisdiction}
+
+PRIMARY TASK:
+${stageDirective}
+
+LEGAL RESEARCH RULES:
+
+1. JURISDICTION FIRST
+Always determine the relevant jurisdiction before applying law.
+
+For Nigeria, distinguish where relevant between:
+- Constitution
+- Federal legislation
+- State legislation
+- Subsidiary legislation
+- Rules of court
+- Customary law
+- Islamic law
+- Judicial precedent
+
+Do not automatically apply a Federal Act to a State matter where
+State legislation governs.
+
+2. AUTHORITY HIERARCHY
+
+Prefer:
+- Constitution
+- Statutes
+- Subsidiary legislation
+- Rules of court
+- Reported judicial decisions
+- Other reliable legal materials
+
+Do not treat an AI-generated summary as equivalent to primary
+legal text.
+
+3. SOURCE DISCIPLINE
+
+The retrieved material below is knowledge-base material.
+
+Do NOT assume that retrieval alone proves that a law is
+currently in force.
+
+A source marked "unverified" must be described as unverified.
+
+4. CURRENT-LAW REQUIREMENT
+
+This question appears to require heightened verification:
+${verificationRequired ? "YES" : "NO"}
+
+When current validity, amendment, repeal, effective dates,
+procedures, deadlines, or later judicial authority matters,
+do not falsely claim that the law has been verified.
+
+5. FOUND VS CURRENT
+
+Distinguish clearly between:
+
+FOUND:
+The material exists in the LexAI knowledge base.
+
+CURRENT:
+The legal position has been independently verified as current.
+
+Do not convert FOUND into CURRENT without verification.
+
+6. MISSING FACTS
+
+If material facts are missing and those facts could change the
+legal conclusion, identify the missing facts.
+
+Do not silently assume important facts.
+
+7. EXCEPTIONS
+
+Identify relevant statutory exceptions, limitations,
+transitional provisions, jurisdictional limitations, and
+procedural requirements when material.
+
+8. CASE LAW
+
+Never invent case names, citations, court levels, years,
+holdings, or quotations.
+
+If no verified case authority is available, say so.
+
+9. CONFIDENCE
+
+Where the available material is insufficient for a definitive
+answer, say:
+
+VERIFIED
+PARTIALLY VERIFIED
+or
+UNVERIFIED
+
+as appropriate.
+
+10. ANSWER STRUCTURE
+
+Where appropriate, structure the answer as:
+
+Direct Answer
+Jurisdiction
+Applicable Law
+Analysis
+Exceptions / Limitations
+Authorities / Sources
+Verification Status
+
+Do not add a "Law checked as of" date unless the law was
+actually checked against an appropriate current source.
+
+KNOWLEDGE BASE RESULTS:
+
+${legalContext || "No matching legal source was retrieved."}
+
+RETRIEVAL STATUS:
+${
+  retrievalError
+    ? retrievalError
+    : `Retrieved ${matches.length} legal knowledge-base result(s).`
+}
+
+IMPORTANT:
+A retrieval failure must never be hidden by pretending that
+the answer was based on the legal database.
+`;
+
+    // ========================================================
+    // 8. Groq reasoning
+    // ========================================================
+
+    if (!groqApiKey) {
+      return new Response(
+        JSON.stringify({
+          error:
+            "LexAI AI service is not configured.",
+        }),
+        {
+          status: 503,
+          headers: corsHeaders,
+        }
+      );
+    }
+
+    const completion =
+      await groq.chat.completions.create({
+        model: "llama-3.3-70b-versatile",
+
+        messages: [
           {
-            type: "image_url",
-            image_url: {
-              url: `data:${attachment.mimeType || "image/jpeg"};base64,${attachment.base64}`,
-            },
+            role: "system",
+            content: systemPrompt,
+          },
+          {
+            role: "user",
+            content: message,
           },
         ],
+
+        temperature: 0.1,
+        max_tokens: 1800,
       });
-    }
 
-    const candidateModels = isImage 
-      ? ["llama-3.2-11b-vision-preview", "llama-3.1-8b-instant"]
-      : ["llama-3.1-8b-instant", "openai/gpt-oss-20b"];
+    const reply =
+      completion.choices[0]?.message?.content ||
+      "Unable to generate legal analysis at this moment.";
 
-    let reply = "";
-    let lastError: any = null;
-
-    for (const modelName of candidateModels) {
-      try {
-        const completion = await groq.chat.completions.create({
-          model: modelName,
-          messages: chatMessages,
-          temperature: 0.2,
-          max_tokens: 2200,
-        });
-
-        reply = completion.choices[0]?.message?.content || "";
-        if (reply) break;
-      } catch (err: any) {
-        lastError = err;
-        console.warn(`Model ${modelName} failed. Trying fallback...`);
-      }
-    }
-
-    if (!reply) {
-      throw lastError || new Error("All AI inference models failed.");
-    }
-
-    // Save assistant reply in DB
-    if (convId) {
-      await supabase.from("messages").insert({
-        conversation_id: convId,
-        role: "assistant",
-        content: reply,
-      });
-    }
+    // ========================================================
+    // 9. Return response
+    // ========================================================
 
     return new Response(
       JSON.stringify({
         response: reply,
-        conversation_id: convId,
-        transcription: audioTranscript || undefined,
-        usage: {
-          count: usedSoFar + 1,
-          limit: DAILY_LIMIT,
-          remaining: Math.max(0, DAILY_LIMIT - (usedSoFar + 1)),
-        }
+        retrieval: {
+          results_found: matches.length,
+          retrieval_error: retrievalError,
+          verification_required:
+            verificationRequired,
+        },
       }),
-      { headers: corsHeaders }
+      {
+        status: 200,
+        headers: corsHeaders,
+      }
     );
   } catch (error: any) {
-    console.error("Chat Error:", error);
+    console.error(
+      "LexAI Legal AI Error:",
+      error
+    );
+
     return new Response(
-      JSON.stringify({ error: `AI Assistant Error: ${error.message || "Failed to process request"}` }),
-      { status: 500, headers: corsHeaders }
+      JSON.stringify({
+        error:
+          "An unexpected error occurred while consulting the legal intelligence engine.",
+      }),
+      {
+        status: 500,
+        headers: corsHeaders,
+      }
     );
   }
 });
