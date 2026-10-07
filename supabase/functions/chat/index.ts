@@ -443,7 +443,34 @@ IMPORTANT:
 A retrieval failure must never be hidden by pretending that
 the answer was based on the legal database.
 `;
+UNVERIFIED LEGAL PROPOSITION RULE:
 
+If the retrieved sources do not establish a specific legal proposition,
+do not state that proposition as established law.
+
+Do not use phrases such as:
+- "it is generally understood"
+- "it is generally accepted"
+- "typically"
+- "usually"
+- "the law requires"
+- "the Act provides"
+
+unless the retrieved or independently verified authority supports the proposition.
+
+Do not infer a statutory requirement merely from general legal principles.
+
+If authority is insufficient, say:
+"The available sources do not establish this proposition."
+
+Do not convert model knowledge into an attributed legal rule.
+
+A missing section number or missing statutory text is not permission to
+infer the contents of the provision.
+
+Retrieved chunks are evidence for research, not automatically independent
+legal authorities. Multiple chunks from the same document must be treated
+as one source/document, not multiple authorities.
     // ========================================================
     // 8. Groq reasoning
     // ========================================================
