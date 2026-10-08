@@ -80,7 +80,14 @@ async function getEmbedding(
 }
 
 // ============================================================
-// Format retrieved legal sources for the language model
+// Compact legal context formatter
+//
+// Keeps only metadata required for legal reasoning so that the
+// final prompt stays comfortably below the 8,000 TPM limit.
+//
+// Document titles, versions, and section numbers are preserved
+// so that distinct documents (e.g. Evidence Act 2011 vs
+// Evidence (Amendment) Act 2023) cannot be merged by the model.
 // ============================================================
 
 function formatLegalContext(matches: any[]): string {
@@ -88,35 +95,29 @@ function formatLegalContext(matches: any[]): string {
     return "";
   }
 
-  return matches
-    .map((m, index) => {
-      const metadata = [
-        `SOURCE ${index + 1}`,
-        `Document: ${m.document_title}`,
-        `Jurisdiction: ${m.jurisdiction || "Unknown"}`,
-        `Document Type: ${m.document_type || "Unknown"}`,
-        `Authority Level: ${m.authority_level || "Unclassified"}`,
-        `Current Status: ${m.current_status || "Unverified"}`,
-        `Version: ${m.version_label || "Unknown"}`,
-        `Official Source: ${m.official_source || "Not specified"}`,
-        `Source URL: ${m.source_url || "Not specified"}`,
-        `Effective From: ${m.effective_from || "Not specified"}`,
-        `Effective To: ${m.effective_to || "Not specified"}`,
-        `Last Verified: ${m.last_verified_at || "Not specified"}`,
-        `Section: ${m.section_number || "Not specified"}`,
-        `Subsection: ${m.subsection || "Not specified"}`,
-        `Source Locator: ${m.source_locator || "Not specified"}`,
-        `Similarity: ${
-          typeof m.similarity === "number"
-            ? m.similarity.toFixed(4)
-            : "N/A"
-        }`,
-      ].join("\n");
+  const selectedMatches = matches.slice(0, 5);
 
-      return `${metadata}
+  return selectedMatches
+    .map((m, index) => {
+      const content = String(m.content || "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .substring(0, 1200);
+
+      return `SOURCE ${index + 1}
+Document: ${m.document_title || "Unknown"}
+Jurisdiction: ${m.jurisdiction || "Unknown"}
+Type: ${m.document_type || "Unknown"}
+Authority: ${m.authority_level || "Unclassified"}
+Status: ${m.current_status || "Unverified"}
+Version: ${m.version_label || "Unknown"}
+Section: ${m.section_number || "Not specified"}
+Subsection: ${m.subsection || "Not specified"}
+Source: ${m.official_source || "Not specified"}
+Locator: ${m.source_locator || "Not specified"}
 
 CONTENT:
-${m.content}`;
+${content}`;
     })
     .join("\n\n==============================\n\n");
 }
@@ -204,6 +205,17 @@ serve(async (req) => {
     }
 
     // ========================================================
+    // Prompt-size protection for the training stage.
+    // The user's actual stored content is NOT modified; this
+    // only limits what is forwarded to the language model.
+    // ========================================================
+
+    const safeEditorContent =
+      typeof editorContent === "string"
+        ? editorContent.substring(0, 4000)
+        : "";
+
+    // ========================================================
     // 1. Platform status
     // ========================================================
 
@@ -282,7 +294,7 @@ serve(async (req) => {
     }
 
     // ========================================================
-    // 5. Build legal context
+    // 5. Build compact legal context (top 5 of 8)
     // ========================================================
 
     const legalContext =
@@ -303,7 +315,7 @@ serve(async (req) => {
     } else if (stage === "training") {
       stageDirective = `Review and critique the user's draft:
 
-"""${editorContent || "No draft provided"}"""
+"""${safeEditorContent || "No draft provided"}"""
 
 Focus on statutory precision, legal reasoning, authority, jurisdiction, exceptions, and professional legal language.`;
     } else if (stage === "practice") {
@@ -431,6 +443,14 @@ A source marked "superseded" must not be presented as current law.
 A source marked "amended" requires attention to the amendment
 history before claiming the original provision represents the
 current law.
+
+Pay particular attention to amendment relationships. For example,
+the Evidence Act 2011 and the Evidence (Amendment) Act 2023 are
+DISTINCT documents. Do not merge their content. If a provision
+was amended, the amendment document controls the amended version
+of that provision. Newly inserted sections (for example sections
+84A–84D) exist only in the amendment and must be attributed to
+the amendment, not to the original Act.
 
 ============================================================
 4. CURRENT-LAW VERIFICATION
@@ -586,6 +606,11 @@ If the relevant section is not available:
 section."
 
 Do not guess based on general knowledge.
+
+When discussing an amended section (for example section 84 of the
+Evidence Act), distinguish clearly between the original provision
+and any amendment. Newly inserted sections such as 84A–84D must
+be attributed to the amendment document, not to the original Act.
 
 ============================================================
 11. MISSING FACTS
@@ -779,7 +804,10 @@ RETRIEVAL STATUS
 ${
   retrievalError
     ? retrievalError
-    : `Retrieved ${matches.length} legal knowledge-base result(s).`
+    : `Retrieved ${matches.length} legal knowledge-base result(s); the top ${Math.min(
+        matches.length,
+        5
+      )} were supplied above.`
 }
 
 ============================================================
@@ -813,26 +841,53 @@ section, citation, quotation, date, procedure, or conclusion.
       );
     }
 
-    const completion =
-      await groq.chat.completions.create({
-        model: "openai/gpt-oss-20b",
-        messages: [
-          {
-            role: "system",
-            content: systemPrompt,
-          },
-          {
-            role: "user",
-            content: message,
-          },
-        ],
-        temperature: 0.1,
-        max_tokens: 1800,
-      });
-
-    const reply =
-      completion.choices[0]?.message?.content ||
+    let reply =
       "Unable to generate legal analysis at this moment.";
+
+    try {
+      const completion =
+        await groq.chat.completions.create({
+          model: "openai/gpt-oss-20b",
+          messages: [
+            {
+              role: "system",
+              content: systemPrompt,
+            },
+            {
+              role: "user",
+              content: message,
+            },
+          ],
+          temperature: 0.1,
+          max_tokens: 1200,
+        });
+
+      reply =
+        completion.choices[0]?.message?.content ||
+        reply;
+    } catch (groqError: any) {
+      console.error(
+        "LexAI Groq request error:",
+        groqError
+      );
+
+      return new Response(
+        JSON.stringify({
+          error:
+            "The legal reasoning engine is temporarily unavailable. Please shorten your inquiry or try again shortly.",
+          retrieval: {
+            results_found: matches.length,
+            retrieval_error: retrievalError,
+            verification_required:
+              verificationRequired,
+          },
+        }),
+        {
+          status: 503,
+          headers: corsHeaders,
+        }
+      );
+    }
 
     // ========================================================
     // 9. Return response
