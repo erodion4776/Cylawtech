@@ -671,7 +671,7 @@ function buildChunks(
   ) {
     const sectionMatch =
       line.match(
-        /^(?:section|sec\.|s\.)\s*([0-9]+[A-Za-z]?(?:[0-9A-Za-z]+)?)/i,
+        /^(?:section|sec\.|s\.)\s*([0-9]+[A-Za-z]?(?:\([0-9A-Za-z]+\))?)/i,
       );
 
     const articleMatch =
@@ -686,7 +686,7 @@ function buildChunks(
 
     const subsectionMatch =
       line.match(
-        /^([0-9]+|[a-z])\s*/i,
+        /^\(([0-9]+|[a-z])\)\s*/i,
       );
 
     if (sectionMatch) {
@@ -774,18 +774,8 @@ function buildChunks(
   return chunks;
 }
 
-/*
- * IMPORTANT:
- *
- * The old implementation created a new Supabase.ai.Session
- * for EVERY chunk.
- *
- * That meant an 8-chunk batch could initialize the model
- * 8 separate times inside a single Edge invocation.
- *
- * We now create ONE session per batch and reuse it.
- */
 function createEmbeddingSession() {
+  // @ts-ignore: Supabase is globally defined in the edge runtime environment
   return new Supabase.ai.Session(
     "gte-small",
   );
@@ -1105,11 +1095,6 @@ async function indexDocumentBatch(
       INDEX_BATCH_SIZE,
     );
 
-  /*
-   * Chunk building is kept exactly as before.
-   * It is deterministic, so the same document always
-   * produces the same chunk positions.
-   */
   const chunks =
     buildChunks(
       document.content,
@@ -1186,13 +1171,6 @@ async function indexDocumentBatch(
       offset + batchSize,
     );
 
-  /*
-   * IMPORTANT:
-   *
-   * If offset == chunks.length, there is nothing left
-   * to embed. Mark the document complete rather than
-   * creating an unnecessary embedding session.
-   */
   if (!selected.length) {
     await supabase
       .from("documents")
@@ -1225,11 +1203,6 @@ async function indexDocumentBatch(
     };
   }
 
-  /*
-   * ONE embedding session for the entire batch.
-   *
-   * This is the main compute optimization.
-   */
   const embeddingSession =
     createEmbeddingSession();
 
@@ -1281,14 +1254,6 @@ async function indexDocumentBatch(
         ? error.message
         : String(error);
 
-    /*
-     * The successful chunks from this batch may already
-     * have been inserted before a later chunk fails.
-     *
-     * The frontend should resume using the last known
-     * successful offset. We intentionally do not pretend
-     * the entire batch succeeded.
-     */
     await supabase
       .from("documents")
       .update({
@@ -1386,13 +1351,6 @@ serve(async (req) => {
     const url =
       new URL(req.url);
 
-    /*
-     * Works with:
-     *
-     * /functions/v1/admin/settings
-     * /functions/v1/admin/documents
-     * /api/admin/... when proxied by Netlify
-     */
     const pathParts =
       url.pathname
         .split("/")
@@ -1748,4 +1706,597 @@ serve(async (req) => {
               body.jurisdiction,
             document_type:
               body.document_type,
-            authority
+            authority_level:
+              body.authority_level,
+            official_source:
+              body.official_source ||
+              fetched.url,
+            source_url:
+              fetched.url,
+            effective_from:
+              body.effective_from,
+            effective_to:
+              body.effective_to,
+            current_status:
+              body.current_status,
+            verification_source:
+              body.verification_source,
+            version_label:
+              body.version_label,
+          },
+        );
+
+      return success(
+        document,
+        `Document imported successfully (${extracted.format}). It is awaiting preview/review before indexing.`,
+      );
+    }
+
+    // ---------------------------------------------------------
+    // UPLOAD FILE
+    // ---------------------------------------------------------
+
+    if (
+      method === "POST" &&
+      path ===
+        "documents/upload"
+    ) {
+      const form =
+        await req.formData();
+
+      const file =
+        form.get("file");
+
+      if (
+        !(file instanceof File)
+      ) {
+        return failure(
+          "No document file was supplied.",
+        );
+      }
+
+      if (
+        file.size >
+        MAX_FILE_BYTES
+      ) {
+        return failure(
+          "File is too large. Maximum size is 20 MB.",
+          400
+        );
+      }
+
+      const bytes =
+        new Uint8Array(
+          await file.arrayBuffer(),
+        );
+
+      const extracted =
+        await extractDocument(
+          bytes,
+          file.type,
+          file.name,
+        );
+
+      const title =
+        String(
+          form.get("title") ||
+            file.name,
+        ).trim();
+
+      const document =
+        await createDocument(
+          {
+            title,
+            content:
+              extracted.content,
+            jurisdiction:
+              form.get(
+                "jurisdiction",
+              ),
+            document_type:
+              form.get(
+                "document_type",
+              ),
+            authority_level:
+              form.get(
+                "authority_level",
+              ),
+            official_source:
+              form.get(
+                "official_source",
+              ),
+            source_url:
+              form.get(
+                "source_url",
+              ),
+            effective_from:
+              form.get(
+                "effective_from",
+              ),
+            effective_to:
+              form.get(
+                "effective_to",
+              ),
+            current_status:
+              form.get(
+                "current_status",
+              ),
+            verification_source:
+              form.get(
+                "verification_source",
+              ),
+            version_label:
+              form.get(
+                "version_label",
+              ),
+          },
+        );
+
+      return success(
+        document,
+        `File uploaded successfully (${extracted.format}). It is awaiting preview/review before indexing.`,
+      );
+    }
+
+    // ---------------------------------------------------------
+    // DOCUMENT PREVIEW
+    // ---------------------------------------------------------
+
+    const previewMatch =
+      path.match(
+        /^documents\/([^/]+)\/preview$/,
+      );
+
+    if (
+      method === "GET" &&
+      previewMatch
+    ) {
+      const id =
+        previewMatch[1];
+
+      const document =
+        await getDocument(
+          id,
+        );
+
+      const chunks =
+        buildChunks(
+          document.content,
+          document.title,
+        );
+
+      const chunkPreviews =
+        chunks
+          .slice(0, 12)
+          .map(
+            (chunk) => ({
+              index:
+                chunk.index,
+              section_number:
+                chunk.section_number,
+              subsection:
+                chunk.subsection,
+              source_locator:
+                chunk.source_locator,
+              content:
+                chunk.content,
+            }),
+          );
+
+      const sections = [
+        ...new Set(
+          chunks
+            .map(
+              (chunk) =>
+                chunk.section_number,
+            )
+            .filter(Boolean),
+        ),
+      ];
+
+      const pagesDetected =
+        (
+          document.content.match(
+            /\f/g,
+          ) || []
+        ).length + 1;
+
+      return success({
+        document: {
+          ...document,
+          full_content:
+            document.content,
+        },
+        analysis: {
+          characters:
+            document.content
+              .length,
+          pages_detected:
+            document.content.includes(
+              "\f",
+            )
+              ? pagesDetected
+              : 0,
+          sections_detected:
+            sections.length,
+          sections,
+          planned_chunks:
+            chunks.length,
+          chunk_previews:
+            chunkPreviews,
+        },
+      });
+    }
+
+    // ---------------------------------------------------------
+    // INDEX DOCUMENT - BATCHED
+    // ---------------------------------------------------------
+
+    const indexMatch =
+      path.match(
+        /^documents\/([^/]+)\/index$/,
+      );
+
+    if (
+      method === "POST" &&
+      indexMatch
+    ) {
+      const id =
+        indexMatch[1];
+
+      const body =
+        await req.json().catch(
+          () => ({}),
+        );
+
+      const offsetParam =
+        Number(
+          url.searchParams.get(
+            "offset",
+          ) ??
+            body.offset ??
+            0,
+        );
+
+      const batchParam =
+        Number(
+          url.searchParams.get(
+            "batch_size",
+          ) ??
+            body.batch_size ??
+            INDEX_BATCH_SIZE,
+        );
+
+      const reset =
+        String(
+          url.searchParams.get(
+            "reset",
+          ) ??
+            body.reset ??
+            "false",
+        ).toLowerCase() ===
+        "true";
+
+      const result =
+        await indexDocumentBatch(
+          id,
+          offsetParam,
+          batchParam,
+          reset,
+        );
+
+      return success(
+        result,
+        result.completed
+          ? "Document indexing completed."
+          : "Indexing batch completed.",
+      );
+    }
+
+    // ---------------------------------------------------------
+    // REINDEX DOCUMENT
+    // ---------------------------------------------------------
+
+    const reindexMatch =
+      path.match(
+        /^documents\/([^/]+)\/reindex$/,
+      );
+
+    if (
+      method === "POST" &&
+      reindexMatch
+    ) {
+      const id =
+        reindexMatch[1];
+
+      const result =
+        await indexDocumentBatch(
+          id,
+          0,
+          INDEX_BATCH_SIZE,
+          true,
+        );
+
+      return success(
+        result,
+        result.completed
+          ? "Document reindexed."
+          : "Reindexing started.",
+      );
+    }
+
+    // ---------------------------------------------------------
+    // UPDATE VERIFICATION
+    // ---------------------------------------------------------
+
+    const verificationMatch =
+      path.match(
+        /^documents\/([^/]+)\/verification$/,
+      );
+
+    if (
+      method === "PATCH" &&
+      verificationMatch
+    ) {
+      const id =
+        verificationMatch[1];
+
+      const body =
+        await req.json();
+
+      const update: Record<
+        string,
+        unknown
+      > = {
+        updated_at:
+          new Date().toISOString(),
+        last_verified_at:
+          new Date().toISOString(),
+      };
+
+      if (
+        body.current_status !==
+        undefined
+      ) {
+        update.current_status =
+          normalizeCurrentStatus(
+            body.current_status,
+          );
+      }
+
+      if (
+        body.verification_source !==
+        undefined
+      ) {
+        update.verification_source =
+          body.verification_source
+            ? String(
+                body.verification_source,
+              ).trim()
+            : null;
+      }
+
+      if (
+        body.effective_from !==
+        undefined
+      ) {
+        update.effective_from =
+          validateDate(
+            body.effective_from,
+          );
+      }
+
+      if (
+        body.effective_to !==
+        undefined
+      ) {
+        update.effective_to =
+          validateDate(
+            body.effective_to,
+          );
+      }
+
+      if (
+        body.version_label !==
+        undefined
+      ) {
+        update.version_label =
+          body.version_label
+            ? String(
+                body.version_label,
+              ).trim()
+            : null;
+      }
+
+      if (
+        body.authority_level !==
+        undefined
+      ) {
+        update.authority_level =
+          normalizeAuthority(
+            body.authority_level,
+          );
+      }
+
+      const {
+        data,
+        error,
+      } = await supabase
+        .from("documents")
+        .update(update)
+        .eq(
+          "id",
+          id,
+        )
+        .select(
+          documentSelect(),
+        )
+        .maybeSingle();
+
+      if (error) throw error;
+
+      if (!data) {
+        return failure(
+          "Document not found.",
+          404,
+        );
+      }
+
+      return success(
+        data,
+        "Verification metadata updated.",
+      );
+    }
+
+    // ---------------------------------------------------------
+    // REJECT DOCUMENT
+    // ---------------------------------------------------------
+
+    const rejectMatch =
+      path.match(
+        /^documents\/([^/]+)\/reject$/,
+      );
+
+    if (
+      method === "PATCH" &&
+      rejectMatch
+    ) {
+      const id =
+        rejectMatch[1];
+
+      const body =
+        await req.json().catch(
+          () => ({}),
+        );
+
+      const reason =
+        typeof body.reason ===
+        "string"
+          ? body.reason.trim()
+          : "Rejected during admin review.";
+
+      const {
+        data,
+        error,
+      } = await supabase
+        .from("documents")
+        .update({
+          status: "rejected",
+          error_log: reason,
+          updated_at:
+            new Date().toISOString(),
+        })
+        .eq(
+          "id",
+          id,
+        )
+        .select(
+          documentSelect(),
+        )
+        .maybeSingle();
+
+      if (error) throw error;
+
+      if (!data) {
+        return failure(
+          "Document not found.",
+          404,
+        );
+      }
+
+      return success(
+        data,
+        "Document rejected.",
+      );
+    }
+
+    // ---------------------------------------------------------
+    // DELETE DOCUMENT
+    // ---------------------------------------------------------
+
+    const deleteDocumentMatch =
+      path.match(
+        /^documents\/([^/]+)$/,
+      );
+
+    if (
+      method === "DELETE" &&
+      deleteDocumentMatch
+    ) {
+      const id =
+        deleteDocumentMatch[1];
+
+      /*
+       * Delete chunks first.
+       *
+       * If this fails, the document itself is NOT deleted,
+       * preventing an orphaned knowledge index.
+       */
+      const {
+        error: chunkError,
+      } = await supabase
+        .from(
+          "knowledge_chunks",
+        )
+        .delete()
+        .eq(
+          "document_id",
+          id,
+        );
+
+      if (chunkError) {
+        throw new Error(
+          `Could not remove document chunks: ${chunkError.message}`,
+        );
+      }
+
+      const {
+        data,
+        error,
+      } = await supabase
+        .from("documents")
+        .delete()
+        .eq(
+          "id",
+          id,
+        )
+        .select("id")
+        .maybeSingle();
+
+      if (error) throw error;
+
+      if (!data) {
+        return failure(
+          "Document not found.",
+          404,
+        );
+      }
+
+      return success(
+        data,
+        "Document and indexed chunks removed.",
+      );
+    }
+
+    return failure(
+      `Endpoint not found: ${method} /${path}`,
+      404,
+    );
+  } catch (error) {
+    console.error(
+      "LexAI Admin Error:",
+      error,
+    );
+
+    const message =
+      error instanceof Error
+        ? error.message
+        : String(error);
+
+    return failure(
+      message ||
+        "Internal server error.",
+      500,
+    );
+  }
+});
