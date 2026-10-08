@@ -592,7 +592,7 @@ function splitLongText(
 }
 
 // ============================================================================
-// Robust Statutory-Section Metadata Parser
+// FIX: Robust Alphanumeric-Aware Statutory Section Metadata Parser
 // ============================================================================
 function buildChunks(
   content: string,
@@ -672,24 +672,32 @@ function buildChunks(
   for (
     const line of lines
   ) {
-    // 1. Delimiter-first match for standard Nigerian patterns: "84.—", "84.—(1)", "84.-", "84 - (1)", "84A.—(1)", etc.
-    // Restricts plain hyphens (-) using lookahead to prevent false-positives on ordinary numbered list items.
-    const delimiterMatch = line.match(/^([0-9]+[A-Za-z]?)\s*(?:\.—|\.-|—|–|-(?=\s*(?:\(|[A-Z])))\s*(?:\(([^)]+)\))?/i);
+    // 1. Alphanumeric statutory sections (e.g., "84A.", "84B. Notwithstanding", "84C. (1) Subject")
+    // Alphanumeric section numbers are always statutory. We can match a simple period separator safely.
+    const alphaNumericMatch = line.match(/^([0-9]+[A-Za-z])\s*(?:\.—|\.-|—|–|\.|-)\s*(?:\(([^)]+)\))?/i);
+
+    // 2. Pure numeric statutory sections (e.g., "84.—", "84.-", "84. (1)", "84. In any proceeding")
+    // Pure numeric section numbers must be followed by clear statutory delimiters or a period if followed by capitalization/subsection to avoid matching ordinary numbered lists.
+    const numericMatch = line.match(/^([0-9]+)\s*(?:\.—|\.-|—|–|-(?=\s*(?:\(|[A-Z]))|\.(?=\s*(?:\(|[A-Z])))\s*(?:\(([^)]+)\))?/i);
     
-    // 2. Standard prefix patterns like "Section 84", "s.84(1)", "S. 84", etc.
+    // 3. Standard prefix patterns like "Section 84", "s.84(1)", "S. 84", etc.
     const standardMatch = line.match(/^(?:section|sec\.|s\.)\s*([0-9]+[A-Za-z]?)\b\s*(?:\(([^)]+)\))?/i);
     
-    // 3. Optional Article matches (e.g. "Article 12")
+    // 4. Optional Article matches (e.g. "Article 12")
     const articleMatch = line.match(/^(?:article|art\.)\s*([0-9]+[A-Za-z]?)\b\s*(?:\(([^)]+)\))?/i);
 
     let isNewSection = false;
     let detectedSection: string | null = null;
     let detectedSubsection: string | null = null;
 
-    if (delimiterMatch) {
+    if (alphaNumericMatch) {
       isNewSection = true;
-      detectedSection = delimiterMatch[1];
-      detectedSubsection = delimiterMatch[2] || null;
+      detectedSection = alphaNumericMatch[1];
+      detectedSubsection = alphaNumericMatch[2] || null;
+    } else if (numericMatch) {
+      isNewSection = true;
+      detectedSection = numericMatch[1];
+      detectedSubsection = numericMatch[2] || null;
     } else if (standardMatch) {
       isNewSection = true;
       detectedSection = standardMatch[1];
@@ -1679,7 +1687,7 @@ serve(async (req) => {
               fetched.url,
             source_url:
               fetched.url,
-              effective_from:
+            effective_from:
               body.effective_from,
             effective_to:
               body.effective_to,
