@@ -80,29 +80,129 @@ async function getEmbedding(
 }
 
 // ============================================================
-// Compact legal context formatter
-//
-// Keeps only metadata required for legal reasoning so that the
-// final prompt stays comfortably below the 8,000 TPM limit.
-//
-// Document titles, versions, and section numbers are preserved
-// so that distinct documents (e.g. Evidence Act 2011 vs
-// Evidence (Amendment) Act 2023) cannot be merged by the model.
+// Section-Aware Query Detection
+// Extracts statutory section references from the user's question
+// deterministically using regex.
 // ============================================================
 
-function formatLegalContext(matches: any[]): string {
+function extractSectionReferences(message: string): string[] {
+  const sections = new Set<string>();
+  const lower = message.toLowerCase();
+
+  const normalize = (s: string) => s.toUpperCase().trim();
+
+  // 1. Match range patterns like "sections 84A to 84D", "84A-84D", "84A–84D"
+  const suffixRangeRegex = /\b(?:sections|ss\.?)\s*([0-9]+)([a-z])\s*(?:to|and|-|–)\s*\1([a-z])\b/gi;
+  let match;
+  while ((match = suffixRangeRegex.exec(lower)) !== null) {
+    const base = match[1];
+    const startChar = match[2].toLowerCase().charCodeAt(0);
+    const endChar = match[3].toLowerCase().charCodeAt(0);
+    if (startChar <= endChar && (endChar - startChar) < 10) {
+      for (let charCode = startChar; charCode <= endChar; charCode++) {
+        sections.add(normalize(base + String.fromCharCode(charCode)));
+      }
+    }
+  }
+
+  // 2. Match numeric ranges like "sections 84 to 86", "84-86"
+  const numericRangeRegex = /\b(?:sections|ss\.?)\s*([0-9]+)\s*(?:to|and|-|–)\s*([0-9]+)\b/gi;
+  while ((match = numericRangeRegex.exec(lower)) !== null) {
+    const start = parseInt(match[1], 10);
+    const end = parseInt(match[2], 10);
+    if (start <= end && (end - start) < 10) {
+      for (let i = start; i <= end; i++) {
+        sections.add(normalize(String(i)));
+      }
+    }
+  }
+
+  // 3. Match individual section patterns like "section 84", "s.84a", "s 84"
+  const singleSectionRegex = /\b(?:section|s\.?)\s*([0-9]+[a-z]*)\b/gi;
+  while ((match = singleSectionRegex.exec(lower)) !== null) {
+    sections.add(normalize(match[1]));
+  }
+
+  return Array.from(sections);
+}
+
+// ============================================================
+// Amendment-Aware Detection
+// Determines if the user inquiry relates to modifications, changes,
+// or amendment transitions.
+// ============================================================
+
+function detectAmendmentContext(message: string): boolean {
+  const text = message.toLowerCase();
+  const amendmentTerms = [
+    "amend",
+    "amendment",
+    "amended by",
+    "principal act",
+    "original act",
+    "inserted",
+    "substituted",
+    "repealed",
+    "changes to",
+    "differences between"
+  ];
+  return amendmentTerms.some((term) => text.includes(term));
+}
+
+// ============================================================
+// Robust Statutory Section Regex Builder
+// Matches formatting variants: Section 84, s. 84, 84., 84A —, 84A., etc.
+// ============================================================
+
+function buildSectionRegex(sec: string): RegExp {
+  const cleanSec = sec.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+  return new RegExp(
+    `(?:\\b(?:section|s\\.?)\\s*${cleanSec}\\b|(?:^|\\s)${cleanSec}(?:\\s*[-—\\.]|\\b))`,
+    "i"
+  );
+}
+
+// ============================================================
+// Targeted Context Compressor
+// Prevents blind truncation of long statutory clauses. If the
+// requested section text occurs deep within the chunk, it extracts
+// the surrounding context rather than taking only the beginning.
+// ============================================================
+
+function compressContent(content: string, requestedSections: string[]): string {
+  const cleaned = content.replace(/\s+/g, " ").trim();
+  if (cleaned.length <= 1500) {
+    return cleaned;
+  }
+
+  if (requestedSections.length > 0) {
+    for (const sec of requestedSections) {
+      const regex = buildSectionRegex(sec);
+      const match = regex.exec(cleaned);
+      if (match && match.index > 300) {
+        // Shift window back slightly to catch introductory headers/context
+        const start = Math.max(0, match.index - 150);
+        const end = Math.min(cleaned.length, start + 1500);
+        return (start > 0 ? "... " : "") + cleaned.substring(start, end) + (end < cleaned.length ? " ..." : "");
+      }
+    }
+  }
+
+  return cleaned.substring(0, 1500);
+}
+
+// ============================================================
+// Formatting Helper for Legal Context Chunks
+// ============================================================
+
+function formatLegalContext(matches: any[], requestedSections: string[]): string {
   if (!matches || matches.length === 0) {
     return "";
   }
 
-  const selectedMatches = matches.slice(0, 5);
-
-  return selectedMatches
+  return matches
     .map((m, index) => {
-      const content = String(m.content || "")
-        .replace(/\s+/g, " ")
-        .trim()
-        .substring(0, 1200);
+      const content = compressContent(m.content || "", requestedSections);
 
       return `SOURCE ${index + 1}
 Document: ${m.document_title || "Unknown"}
@@ -264,6 +364,7 @@ serve(async (req) => {
 
     // ========================================================
     // 4. Search the ACTUAL legal knowledge base
+    // Increase match_count from 8 to 20 to widen semantic pool
     // ========================================================
 
     if (embedding) {
@@ -272,7 +373,7 @@ serve(async (req) => {
         {
           query_embedding: embedding,
           match_threshold: 0.20,
-          match_count: 8,
+          match_count: 20,
           p_jurisdiction: normalizedJurisdiction,
         }
       );
@@ -294,14 +395,150 @@ serve(async (req) => {
     }
 
     // ========================================================
-    // 5. Build compact legal context (top 5 of 8)
+    // 5. Intelligent Ranking and Selection
+    // Prioritizes requested sections and balances Principal/Amendment
+    // documents to prevent source crowd-out.
     // ========================================================
 
-    const legalContext =
-      formatLegalContext(matches);
+    const requestedSections = extractSectionReferences(message);
+    const hasAmendmentContext = detectAmendmentContext(message);
 
-    const verificationRequired =
-      requiresVerification(message);
+    // Calculate metadata-aware scores for each matched chunk
+    const scoredMatches = matches.map((m) => {
+      let score = (m.similarity || 0) * 10; // Baseline semantic scale (max ~10 pts)
+      let sectionMatchScore = 0;
+
+      const chunkSection = String(m.section_number || "").toUpperCase().trim();
+      const chunkSubsection = String(m.subsection || "").toUpperCase().trim();
+      const chunkLocator = String(m.source_locator || "").toUpperCase();
+      const chunkContent = String(m.content || "").toUpperCase();
+      const isAmendmentDoc = 
+        String(m.document_type || "").toLowerCase().includes("amend") ||
+        String(m.document_title || "").toLowerCase().includes("amend");
+
+      for (const reqSec of requestedSections) {
+        const target = reqSec.trim();
+        const sectionRegex = buildSectionRegex(target);
+
+        // Priority 1: Exact section_number match (strongest signal)
+        if (chunkSection === target) {
+          sectionMatchScore += 150;
+        } 
+        // Soft section match (ranges or subparts)
+        else if (chunkSection.includes(target) || target.includes(chunkSection)) {
+          sectionMatchScore += 50;
+        }
+
+        // Priority 2: Exact subsection match
+        if (chunkSubsection === target) {
+          sectionMatchScore += 100;
+        }
+
+        // Priority 3: Exact section reference in source_locator
+        if (sectionRegex.test(chunkLocator)) {
+          sectionMatchScore += 40;
+        }
+
+        // Priority 4: Strong section reference in content body using regex
+        if (sectionRegex.test(chunkContent)) {
+          sectionMatchScore += 30;
+        }
+
+        // Priority 5: Amendment relationship to requested section
+        if (isAmendmentDoc && sectionRegex.test(chunkContent)) {
+          sectionMatchScore += 20;
+        }
+      }
+
+      score += sectionMatchScore;
+      return { ...m, _score: score, _sectionMatchScore: sectionMatchScore };
+    });
+
+    // Sort by calculated legal relevance descending
+    const sortedMatches = scoredMatches.sort((a, b) => b._score - a._score);
+
+    // Relevance-first selection algorithm
+    let selectedMatches: any[] = [];
+
+    if (hasAmendmentContext && requestedSections.length > 0) {
+      const relevantMatches = sortedMatches.filter((m) => m._sectionMatchScore > 0);
+      const fallbackMatches = sortedMatches.filter((m) => m._sectionMatchScore === 0);
+      const addedIds = new Set<string>();
+
+      // Select the strongest relevant matches first, pairing principal Act & amendment counterparts when applicable
+      for (const match of relevantMatches) {
+        if (selectedMatches.length >= 5) break;
+        if (addedIds.has(match.id)) continue;
+
+        selectedMatches.push(match);
+        addedIds.add(match.id);
+
+        const currentSection = String(match.section_number || "").toUpperCase().trim();
+        if (currentSection && selectedMatches.length < 5) {
+          const isCurrentAmend = 
+            String(match.document_type || "").toLowerCase().includes("amend") ||
+            String(match.document_title || "").toLowerCase().includes("amend");
+
+          // Find the highest scoring counterpart for the SAME requested section
+          const counterpart = relevantMatches.find((m) => {
+            if (addedIds.has(m.id)) return false;
+            const mSection = String(m.section_number || "").toUpperCase().trim();
+            if (mSection !== currentSection) return false;
+
+            const isMAmend = 
+              String(m.document_type || "").toLowerCase().includes("amend") ||
+              String(m.document_title || "").toLowerCase().includes("amend");
+
+            return isMAmend !== isCurrentAmend;
+          });
+
+          if (counterpart) {
+            selectedMatches.push(counterpart);
+            addedIds.add(counterpart.id);
+          }
+        }
+      }
+
+      // Fill remaining slots using remaining high-scoring relevant matches
+      for (const match of relevantMatches) {
+        if (selectedMatches.length >= 5) break;
+        if (!addedIds.has(match.id)) {
+          selectedMatches.push(match);
+          addedIds.add(match.id);
+        }
+      }
+
+      // Fallback to remaining semantic matches if fewer than 5 relevant matches exist
+      for (const match of fallbackMatches) {
+        if (selectedMatches.length >= 5) break;
+        if (!addedIds.has(match.id)) {
+          selectedMatches.push(match);
+          addedIds.add(match.id);
+        }
+      }
+    } else {
+      // Non-amendment contexts or generic searches grab the top 5 sorted results
+      selectedMatches = sortedMatches.slice(0, 5);
+    }
+
+    // Double check: Never permit context to exceed 5 chunks
+    selectedMatches = selectedMatches.slice(0, 5);
+
+    // Safe diagnostic logging (no secrets or sensitive data leaked)
+    console.log("LexAI retrieval selection:", {
+      detectedSections: requestedSections,
+      hasAmendmentContext,
+      semanticMatchesCount: matches.length,
+      selected: selectedMatches.map((m) => ({
+        document: m.document_title,
+        section: m.section_number,
+        type: m.document_type,
+        score: m._score,
+      })),
+    });
+
+    const legalContext = formatLegalContext(selectedMatches, requestedSections);
+    const verificationRequired = requiresVerification(message);
 
     // ========================================================
     // 6. Stage directive
@@ -446,11 +683,10 @@ current law.
 
 Pay particular attention to amendment relationships. For example,
 the Evidence Act 2011 and the Evidence (Amendment) Act 2023 are
-DISTINCT documents. Do not merge their content. If a provision
-was amended, the amendment document controls the amended version
-of that provision. Newly inserted sections (for example sections
-84A–84D) exist only in the amendment and must be attributed to
-the amendment, not to the original Act.
+DISTINCT documents. Do not merge their content.
+
+When a provision was amended, distinguish the principal Act's original provision from the amendment text. The amendment document establishes the amendment made to that provision; do not treat the amendment document alone as a complete consolidated version of the principal Act.
+Newly inserted sections must be attributed to the amendment document unless the available consolidated primary text establishes otherwise.
 
 ============================================================
 4. CURRENT-LAW VERIFICATION
@@ -647,7 +883,7 @@ Do not invent exceptions.
 
 ============================================================
 13. CASE LAW
-============================================================
+// ============================================================
 
 Never invent:
 
@@ -805,9 +1041,9 @@ ${
   retrievalError
     ? retrievalError
     : `Retrieved ${matches.length} legal knowledge-base result(s); the top ${Math.min(
-        matches.length,
+        selectedMatches.length,
         5
-      )} were supplied above.`
+      )} were prioritized and supplied above.`
 }
 
 ============================================================
