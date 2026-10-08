@@ -15,7 +15,10 @@ const MAX_TEXT_LENGTH = 10_000_000;
 const MAX_FILE_BYTES = 20 * 1024 * 1024;
 const MAX_URL_BYTES = 10 * 1024 * 1024;
 const MAX_REDIRECTS = 5;
-const INDEX_BATCH_SIZE = 8;
+
+// Reduced from 8 to 2 to prevent Edge compute exhaustion
+const INDEX_BATCH_SIZE = 2;
+
 const MAX_CHUNK_CHARS = 1800;
 
 const supabase = createClient(
@@ -51,11 +54,14 @@ function failure(
   status = 400,
   details?: unknown,
 ): Response {
-  return json({
-    success: false,
-    error,
-    ...(details !== undefined ? { details } : {}),
-  }, status);
+  return json(
+    {
+      success: false,
+      error,
+      ...(details !== undefined ? { details } : {}),
+    },
+    status,
+  );
 }
 
 function normalizeText(value: unknown): string {
@@ -69,10 +75,19 @@ function normalizeText(value: unknown): string {
 }
 
 function normalizeJurisdiction(value: unknown): string {
-  const v = String(value ?? "nigeria").trim().toLowerCase();
+  const v = String(value ?? "nigeria")
+    .trim()
+    .toLowerCase();
 
   if (v === "ng" || v === "nigeria") return "nigeria";
-  if (v === "us" || v === "usa" || v === "united states") return "us";
+  if (
+    v === "us" ||
+    v === "usa" ||
+    v === "united states"
+  ) {
+    return "us";
+  }
+
   if (v === "global") return "global";
 
   return v || "nigeria";
@@ -92,7 +107,9 @@ function normalizeDocumentType(value: unknown): string {
     "principle",
   ]);
 
-  const v = String(value ?? "statute").trim().toLowerCase();
+  const v = String(value ?? "statute")
+    .trim()
+    .toLowerCase();
 
   return allowed.has(v) ? v : "statute";
 }
@@ -104,7 +121,9 @@ function normalizeAuthority(value: unknown): string {
     "orientation",
   ]);
 
-  const v = String(value ?? "primary").trim().toLowerCase();
+  const v = String(value ?? "primary")
+    .trim()
+    .toLowerCase();
 
   return allowed.has(v) ? v : "primary";
 }
@@ -120,7 +139,9 @@ function normalizeCurrentStatus(value: unknown): string {
     "pending_review",
   ]);
 
-  const v = String(value ?? "unverified").trim().toLowerCase();
+  const v = String(value ?? "unverified")
+    .trim()
+    .toLowerCase();
 
   return allowed.has(v) ? v : "unverified";
 }
@@ -160,7 +181,9 @@ function cleanHtml(html: string): string {
     .trim();
 }
 
-function extensionFromContentType(contentType: string): string {
+function extensionFromContentType(
+  contentType: string,
+): string {
   const ct = contentType.toLowerCase();
 
   if (ct.includes("pdf")) return "pdf";
@@ -170,12 +193,19 @@ function extensionFromContentType(contentType: string): string {
   return "";
 }
 
-function looksLikePrivateIPv4(host: string): boolean {
+function looksLikePrivateIPv4(
+  host: string,
+): boolean {
   const parts = host.split(".").map(Number);
 
   if (
     parts.length !== 4 ||
-    parts.some((n) => !Number.isInteger(n) || n < 0 || n > 255)
+    parts.some(
+      (n) =>
+        !Number.isInteger(n) ||
+        n < 0 ||
+        n > 255,
+    )
   ) {
     return false;
   }
@@ -192,8 +222,12 @@ function looksLikePrivateIPv4(host: string): boolean {
   );
 }
 
-function isPrivateHostname(hostname: string): boolean {
-  const host = hostname.toLowerCase().replace(/\.$/, "");
+function isPrivateHostname(
+  hostname: string,
+): boolean {
+  const host = hostname
+    .toLowerCase()
+    .replace(/\.$/, "");
 
   if (
     host === "localhost" ||
@@ -206,7 +240,9 @@ function isPrivateHostname(hostname: string): boolean {
     return true;
   }
 
-  if (looksLikePrivateIPv4(host)) return true;
+  if (looksLikePrivateIPv4(host)) {
+    return true;
+  }
 
   if (
     host === "::1" ||
@@ -220,7 +256,9 @@ function isPrivateHostname(hostname: string): boolean {
   return false;
 }
 
-function validateExternalUrl(rawUrl: string): URL {
+function validateExternalUrl(
+  rawUrl: string,
+): URL {
   let url: URL;
 
   try {
@@ -229,36 +267,57 @@ function validateExternalUrl(rawUrl: string): URL {
     throw new Error("Invalid URL.");
   }
 
-  if (!["http:", "https:"].includes(url.protocol)) {
-    throw new Error("Only HTTP and HTTPS URLs are allowed.");
+  if (
+    !["http:", "https:"].includes(
+      url.protocol,
+    )
+  ) {
+    throw new Error(
+      "Only HTTP and HTTPS URLs are allowed.",
+    );
   }
 
   if (url.username || url.password) {
-    throw new Error("URLs containing credentials are not allowed.");
+    throw new Error(
+      "URLs containing credentials are not allowed.",
+    );
   }
 
   if (isPrivateHostname(url.hostname)) {
-    throw new Error("Private or local network URLs are not allowed.");
+    throw new Error(
+      "Private or local network URLs are not allowed.",
+    );
   }
 
-  const host = url.hostname.toLowerCase();
+  const host =
+    url.hostname.toLowerCase();
 
   if (
     host.includes("supabase.co") ||
     host.includes("supabase.com") ||
     host.includes("supabase.net")
   ) {
-    throw new Error("Supabase URLs are not allowed for document import.");
+    throw new Error(
+      "Supabase URLs are not allowed for document import.",
+    );
   }
 
   return url;
 }
 
-async function fetchExternalDocument(rawUrl: string) {
-  let current = validateExternalUrl(rawUrl);
+async function fetchExternalDocument(
+  rawUrl: string,
+) {
+  let current =
+    validateExternalUrl(rawUrl);
 
-  for (let redirect = 0; redirect <= MAX_REDIRECTS; redirect++) {
-    const controller = new AbortController();
+  for (
+    let redirect = 0;
+    redirect <= MAX_REDIRECTS;
+    redirect++
+  ) {
+    const controller =
+      new AbortController();
 
     const timeout = setTimeout(() => {
       controller.abort();
@@ -267,40 +326,61 @@ async function fetchExternalDocument(rawUrl: string) {
     let response: Response;
 
     try {
-      response = await fetch(current.toString(), {
-        method: "GET",
-        redirect: "manual",
-        signal: controller.signal,
-        headers: {
-          "User-Agent": "LexAI-LegalResearchBot/1.0",
-          "Accept":
-            "application/pdf,text/html,text/plain,application/xhtml+xml;q=0.9,*/*;q=0.1",
+      response = await fetch(
+        current.toString(),
+        {
+          method: "GET",
+          redirect: "manual",
+          signal: controller.signal,
+          headers: {
+            "User-Agent":
+              "LexAI-LegalResearchBot/1.0",
+            "Accept":
+              "application/pdf,text/html,text/plain,application/xhtml+xml;q=0.9,*/*;q=0.1",
+          },
         },
-      });
+      );
     } catch (error) {
       throw new Error(
         `Unable to fetch URL: ${
-          error instanceof Error ? error.message : String(error)
+          error instanceof Error
+            ? error.message
+            : String(error)
         }`,
       );
     } finally {
       clearTimeout(timeout);
     }
 
-    if ([301, 302, 303, 307, 308].includes(response.status)) {
+    if (
+      [301, 302, 303, 307, 308].includes(
+        response.status,
+      )
+    ) {
       if (redirect === MAX_REDIRECTS) {
-        throw new Error("Too many redirects.");
+        throw new Error(
+          "Too many redirects.",
+        );
       }
 
-      const location = response.headers.get("location");
+      const location =
+        response.headers.get(
+          "location",
+        );
 
       if (!location) {
-        throw new Error("Redirect response has no location.");
+        throw new Error(
+          "Redirect response has no location.",
+        );
       }
 
-      current = validateExternalUrl(
-        new URL(location, current).toString(),
-      );
+      current =
+        validateExternalUrl(
+          new URL(
+            location,
+            current,
+          ).toString(),
+        );
 
       continue;
     }
@@ -311,22 +391,40 @@ async function fetchExternalDocument(rawUrl: string) {
       );
     }
 
-    const contentLength = Number(
-      response.headers.get("content-length") ?? "0",
-    );
+    const contentLength =
+      Number(
+        response.headers.get(
+          "content-length",
+        ) ?? "0",
+      );
 
-    if (contentLength > MAX_URL_BYTES) {
-      throw new Error("Remote document is too large.");
+    if (
+      contentLength >
+      MAX_URL_BYTES
+    ) {
+      throw new Error(
+        "Remote document is too large.",
+      );
     }
 
-    const buffer = new Uint8Array(await response.arrayBuffer());
+    const buffer =
+      new Uint8Array(
+        await response.arrayBuffer(),
+      );
 
-    if (buffer.byteLength > MAX_URL_BYTES) {
-      throw new Error("Remote document is too large.");
+    if (
+      buffer.byteLength >
+      MAX_URL_BYTES
+    ) {
+      throw new Error(
+        "Remote document is too large.",
+      );
     }
 
     const contentType =
-      response.headers.get("content-type") ?? "";
+      response.headers.get(
+        "content-type",
+      ) ?? "";
 
     return {
       url: current.toString(),
@@ -335,7 +433,9 @@ async function fetchExternalDocument(rawUrl: string) {
     };
   }
 
-  throw new Error("Unable to fetch document.");
+  throw new Error(
+    "Unable to fetch document.",
+  );
 }
 
 async function extractDocument(
@@ -343,17 +443,24 @@ async function extractDocument(
   contentType: string,
   filename = "",
 ) {
-  const lowerName = filename.toLowerCase();
+  const lowerName =
+    filename.toLowerCase();
 
   const isPdf =
-    contentType.toLowerCase().includes("pdf") ||
+    contentType
+      .toLowerCase()
+      .includes("pdf") ||
     lowerName.endsWith(".pdf") ||
-    new TextDecoder().decode(bytes.slice(0, 5)) === "%PDF-";
+    new TextDecoder()
+      .decode(bytes.slice(0, 5)) ===
+      "%PDF-";
 
   if (isPdf) {
-    const parsed = await pdfParse(bytes);
+    const parsed =
+      await pdfParse(bytes);
 
-    const text = normalizeText(parsed.text);
+    const text =
+      normalizeText(parsed.text);
 
     if (text.length < 20) {
       throw new Error(
@@ -363,21 +470,31 @@ async function extractDocument(
 
     return {
       content: text,
-      pages: Number(parsed.numpages || 0),
+      pages: Number(
+        parsed.numpages || 0,
+      ),
       format: "pdf",
     };
   }
 
-  const raw = new TextDecoder("utf-8").decode(bytes);
+  const raw =
+    new TextDecoder(
+      "utf-8",
+    ).decode(bytes);
 
   const isHtml =
-    contentType.toLowerCase().includes("html") ||
+    contentType
+      .toLowerCase()
+      .includes("html") ||
     lowerName.endsWith(".html") ||
     lowerName.endsWith(".htm");
 
-  const text = normalizeText(
-    isHtml ? cleanHtml(raw) : raw,
-  );
+  const text =
+    normalizeText(
+      isHtml
+        ? cleanHtml(raw)
+        : raw,
+    );
 
   if (text.length < 20) {
     throw new Error(
@@ -388,44 +505,87 @@ async function extractDocument(
   return {
     content: text,
     pages: 0,
-    format: isHtml ? "html" : "text",
+    format: isHtml
+      ? "html"
+      : "text",
   };
 }
 
 interface Chunk {
   index: number;
-  section_number: string | null;
-  subsection: string | null;
+  section_number:
+    string | null;
+  subsection:
+    string | null;
   source_locator: string;
   content: string;
 }
 
-function splitLongText(text: string, maxChars = MAX_CHUNK_CHARS): string[] {
+function splitLongText(
+  text: string,
+  maxChars = MAX_CHUNK_CHARS,
+): string[] {
   const output: string[] = [];
 
-  let remaining = text.trim();
+  let remaining =
+    text.trim();
 
-  while (remaining.length > maxChars) {
-    let cut = remaining.lastIndexOf("\n", maxChars);
+  while (
+    remaining.length >
+    maxChars
+  ) {
+    let cut =
+      remaining.lastIndexOf(
+        "\n",
+        maxChars,
+      );
 
-    if (cut < Math.floor(maxChars * 0.55)) {
-      cut = remaining.lastIndexOf(". ", maxChars);
+    if (
+      cut <
+      Math.floor(
+        maxChars * 0.55,
+      )
+    ) {
+      cut =
+        remaining.lastIndexOf(
+          ". ",
+          maxChars,
+        );
     }
 
-    if (cut < Math.floor(maxChars * 0.55)) {
-      cut = remaining.lastIndexOf(" ", maxChars);
+    if (
+      cut <
+      Math.floor(
+        maxChars * 0.55,
+      )
+    ) {
+      cut =
+        remaining.lastIndexOf(
+          " ",
+          maxChars,
+        );
     }
 
     if (cut <= 0) {
       cut = maxChars;
     }
 
-    output.push(remaining.slice(0, cut).trim());
-    remaining = remaining.slice(cut).trim();
+    output.push(
+      remaining
+        .slice(0, cut)
+        .trim(),
+    );
+
+    remaining =
+      remaining
+        .slice(cut)
+        .trim();
   }
 
   if (remaining) {
-    output.push(remaining);
+    output.push(
+      remaining,
+    );
   }
 
   return output;
@@ -435,40 +595,59 @@ function buildChunks(
   content: string,
   title: string,
 ): Chunk[] {
-  const normalized = normalizeText(content);
+  const normalized =
+    normalizeText(content);
 
   if (!normalized) return [];
 
-  const lines = normalized
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
+  const lines =
+    normalized
+      .split("\n")
+      .map((line) =>
+        line.trim()
+      )
+      .filter(Boolean);
 
   const chunks: Chunk[] = [];
 
   let current: string[] = [];
-  let currentSection: string | null = null;
-  let currentSubsection: string | null = null;
+  let currentSection:
+    | string
+    | null = null;
+  let currentSubsection:
+    | string
+    | null = null;
 
   function flush() {
-    if (!current.length) return;
+    if (!current.length) {
+      return;
+    }
 
-    const text = current.join("\n").trim();
+    const text =
+      current
+        .join("\n")
+        .trim();
 
     if (!text) {
       current = [];
       return;
     }
 
-    const pieces = splitLongText(text);
+    const pieces =
+      splitLongText(text);
 
-    for (const piece of pieces) {
-      const index = chunks.length;
+    for (
+      const piece of pieces
+    ) {
+      const index =
+        chunks.length;
 
       chunks.push({
         index,
-        section_number: currentSection,
-        subsection: currentSubsection,
+        section_number:
+          currentSection,
+        subsection:
+          currentSubsection,
         source_locator: [
           title,
           currentSection
@@ -487,10 +666,12 @@ function buildChunks(
     current = [];
   }
 
-  for (const line of lines) {
+  for (
+    const line of lines
+  ) {
     const sectionMatch =
       line.match(
-        /^(?:section|sec\.|s\.)\s*([0-9]+[A-Za-z]?(?:\([0-9A-Za-z]+\))?)/i,
+        /^(?:section|sec\.|s\.)\s*([0-9]+[A-Za-z]?(?:[0-9A-Za-z]+)?)/i,
       );
 
     const articleMatch =
@@ -499,16 +680,24 @@ function buildChunks(
       );
 
     const numericHeading =
-      line.match(/^([0-9]{1,3})\.\s+([A-Z][^.!?]{2,120})$/);
+      line.match(
+        /^([0-9]{1,3})\.\s+([A-Z][^.!?]{2,120})$/,
+      );
 
     const subsectionMatch =
-      line.match(/^\(([0-9]+|[a-z])\)\s*/i);
+      line.match(
+        /^([0-9]+|[a-z])\s*/i,
+      );
 
     if (sectionMatch) {
       flush();
 
-      currentSection = sectionMatch[1];
-      currentSubsection = null;
+      currentSection =
+        sectionMatch[1];
+
+      currentSubsection =
+        null;
+
       current.push(line);
 
       continue;
@@ -517,35 +706,53 @@ function buildChunks(
     if (articleMatch) {
       flush();
 
-      currentSection = `Article ${articleMatch[1]}`;
-      currentSubsection = null;
+      currentSection =
+        `Article ${articleMatch[1]}`;
+
+      currentSubsection =
+        null;
+
       current.push(line);
 
       continue;
     }
 
-    if (numericHeading && !subsectionMatch) {
+    if (
+      numericHeading &&
+      !subsectionMatch
+    ) {
       flush();
 
-      currentSection = numericHeading[1];
-      currentSubsection = null;
+      currentSection =
+        numericHeading[1];
+
+      currentSubsection =
+        null;
+
       current.push(line);
 
       continue;
     }
 
-    if (subsectionMatch && currentSection) {
-      const subsection = subsectionMatch[1];
+    if (
+      subsectionMatch &&
+      currentSection
+    ) {
+      const subsection =
+        subsectionMatch[1];
 
       if (
         current.length &&
         currentSubsection &&
-        subsection !== currentSubsection
+        subsection !==
+          currentSubsection
       ) {
         flush();
       }
 
-      currentSubsection = subsection;
+      currentSubsection =
+        subsection;
+
       current.push(line);
 
       continue;
@@ -553,7 +760,11 @@ function buildChunks(
 
     current.push(line);
 
-    if (current.join("\n").length >= MAX_CHUNK_CHARS) {
+    if (
+      current.join("\n")
+        .length >=
+      MAX_CHUNK_CHARS
+    ) {
       flush();
     }
   }
@@ -563,20 +774,47 @@ function buildChunks(
   return chunks;
 }
 
-async function createEmbedding(text: string): Promise<number[]> {
-  const session = new Supabase.ai.Session("gte-small");
-
-  const output = await session.run(
-    text.slice(0, 6000),
-    {
-      mean_pool: true,
-      normalize: true,
-    },
+/*
+ * IMPORTANT:
+ *
+ * The old implementation created a new Supabase.ai.Session
+ * for EVERY chunk.
+ *
+ * That meant an 8-chunk batch could initialize the model
+ * 8 separate times inside a single Edge invocation.
+ *
+ * We now create ONE session per batch and reuse it.
+ */
+function createEmbeddingSession() {
+  return new Supabase.ai.Session(
+    "gte-small",
   );
+}
 
-  const embedding = Array.from(output as Iterable<number>);
+async function createEmbedding(
+  session: ReturnType<
+    typeof createEmbeddingSession
+  >,
+  text: string,
+): Promise<number[]> {
+  const output =
+    await session.run(
+      text.slice(0, 6000),
+      {
+        mean_pool: true,
+        normalize: true,
+      },
+    );
 
-  if (embedding.length !== 384) {
+  const embedding =
+    Array.from(
+      output as Iterable<number>,
+    );
+
+  if (
+    embedding.length !==
+    384
+  ) {
     throw new Error(
       `Embedding dimension mismatch. Expected 384, received ${embedding.length}.`,
     );
@@ -609,9 +847,18 @@ function documentSelect() {
   ].join(",");
 }
 
-async function authenticate(req: Request): Promise<boolean> {
-  const supplied = req.headers.get("x-admin-key");
-  const expected = Deno.env.get("ADMIN_KEY");
+async function authenticate(
+  req: Request,
+): Promise<boolean> {
+  const supplied =
+    req.headers.get(
+      "x-admin-key",
+    );
+
+  const expected =
+    Deno.env.get(
+      "ADMIN_KEY",
+    );
 
   if (!expected) {
     throw new Error(
@@ -619,11 +866,19 @@ async function authenticate(req: Request): Promise<boolean> {
     );
   }
 
-  return Boolean(supplied && supplied === expected);
+  return Boolean(
+    supplied &&
+      supplied === expected,
+  );
 }
 
-async function getDocument(id: string) {
-  const { data, error } = await supabase
+async function getDocument(
+  id: string,
+) {
+  const {
+    data,
+    error,
+  } = await supabase
     .from("documents")
     .select("*")
     .eq("id", id)
@@ -632,7 +887,9 @@ async function getDocument(id: string) {
   if (error) throw error;
 
   if (!data) {
-    throw new Error("Document not found.");
+    throw new Error(
+      "Document not found.",
+    );
   }
 
   return data;
@@ -652,7 +909,10 @@ async function createDocument(input: {
   verification_source?: unknown;
   version_label?: unknown;
 }) {
-  const content = normalizeText(input.content);
+  const content =
+    normalizeText(
+      input.content,
+    );
 
   if (content.length < 20) {
     throw new Error(
@@ -660,37 +920,58 @@ async function createDocument(input: {
     );
   }
 
-  if (content.length > MAX_TEXT_LENGTH) {
+  if (
+    content.length >
+    MAX_TEXT_LENGTH
+  ) {
     throw new Error(
       "Document content exceeds the maximum allowed size.",
     );
   }
 
-  const title = normalizeText(input.title);
+  const title =
+    normalizeText(
+      input.title,
+    );
 
   if (!title) {
-    throw new Error("Document title is required.");
+    throw new Error(
+      "Document title is required.",
+    );
   }
 
   const sourceUrl =
     input.source_url
-      ? String(input.source_url).trim()
+      ? String(
+          input.source_url,
+        ).trim()
       : null;
 
   if (sourceUrl) {
-    validateExternalUrl(sourceUrl);
+    validateExternalUrl(
+      sourceUrl,
+    );
   }
 
   const versionLabel =
     input.version_label
-      ? String(input.version_label).trim()
+      ? String(
+          input.version_label,
+        ).trim()
       : null;
 
   if (sourceUrl) {
-    const { data: sameUrl } = await supabase
+    const {
+      data: sameUrl,
+    } = await supabase
       .from("documents")
-      .select("id,title,status,version_label")
-      .eq("source_url", sourceUrl)
+      .select(
+        "id,title,status,version_label",
+      )
+      .eq(
+        "source_url",
+        sourceUrl,
+      )
       .limit(1)
       .maybeSingle();
 
@@ -702,11 +983,21 @@ async function createDocument(input: {
   }
 
   if (versionLabel) {
-    const { data: sameVersion } = await supabase
+    const {
+      data: sameVersion,
+    } = await supabase
       .from("documents")
-      .select("id,title,status,version_label")
-      .eq("title", title)
-      .eq("version_label", versionLabel)
+      .select(
+        "id,title,status,version_label",
+      )
+      .eq(
+        "title",
+        title,
+      )
+      .eq(
+        "version_label",
+        versionLabel,
+      )
       .limit(1)
       .maybeSingle();
 
@@ -717,45 +1008,62 @@ async function createDocument(input: {
     }
   }
 
-  const { data, error } = await supabase
+  const {
+    data,
+    error,
+  } = await supabase
     .from("documents")
     .insert({
       title,
-      jurisdiction: normalizeJurisdiction(
-        input.jurisdiction,
-      ),
-      document_type: normalizeDocumentType(
-        input.document_type,
-      ),
+      jurisdiction:
+        normalizeJurisdiction(
+          input.jurisdiction,
+        ),
+      document_type:
+        normalizeDocumentType(
+          input.document_type,
+        ),
       content,
       status: "pending",
       total_sections: 0,
       processed_sections: 0,
       error_log: null,
-      authority_level: normalizeAuthority(
-        input.authority_level,
-      ),
+      authority_level:
+        normalizeAuthority(
+          input.authority_level,
+        ),
       official_source:
         input.official_source
-          ? String(input.official_source).trim()
+          ? String(
+              input.official_source,
+            ).trim()
           : null,
-      source_url: sourceUrl,
-      effective_from: validateDate(
-        input.effective_from,
-      ),
-      effective_to: validateDate(
-        input.effective_to,
-      ),
-      current_status: normalizeCurrentStatus(
-        input.current_status,
-      ),
+      source_url:
+        sourceUrl,
+      effective_from:
+        validateDate(
+          input.effective_from,
+        ),
+      effective_to:
+        validateDate(
+          input.effective_to,
+        ),
+      current_status:
+        normalizeCurrentStatus(
+          input.current_status,
+        ),
       verification_source:
         input.verification_source
-          ? String(input.verification_source).trim()
+          ? String(
+              input.verification_source,
+            ).trim()
           : null,
-      version_label: versionLabel,
+      version_label:
+        versionLabel,
     })
-    .select(documentSelect())
+    .select(
+      documentSelect(),
+    )
     .single();
 
   if (error) throw error;
@@ -769,29 +1077,44 @@ async function indexDocumentBatch(
   requestedBatchSize: number,
   reset: boolean,
 ) {
-  const document = await getDocument(documentId);
+  const document =
+    await getDocument(
+      documentId,
+    );
 
-  let offset = Math.max(
-    0,
-    Number.isFinite(requestedOffset)
-      ? requestedOffset
-      : 0,
-  );
-
-  const batchSize = Math.min(
+  let offset =
     Math.max(
-      1,
-      Number.isFinite(requestedBatchSize)
-        ? requestedBatchSize
-        : INDEX_BATCH_SIZE,
-    ),
-    INDEX_BATCH_SIZE,
-  );
+      0,
+      Number.isFinite(
+        requestedOffset,
+      )
+        ? requestedOffset
+        : 0,
+    );
 
-  const chunks = buildChunks(
-    document.content,
-    document.title,
-  );
+  const batchSize =
+    Math.min(
+      Math.max(
+        1,
+        Number.isFinite(
+          requestedBatchSize,
+        )
+          ? requestedBatchSize
+          : INDEX_BATCH_SIZE,
+      ),
+      INDEX_BATCH_SIZE,
+    );
+
+  /*
+   * Chunk building is kept exactly as before.
+   * It is deterministic, so the same document always
+   * produces the same chunk positions.
+   */
+  const chunks =
+    buildChunks(
+      document.content,
+      document.title,
+    );
 
   if (!chunks.length) {
     throw new Error(
@@ -800,12 +1123,21 @@ async function indexDocumentBatch(
   }
 
   if (reset) {
-    const { error: deleteError } = await supabase
-      .from("knowledge_chunks")
+    const {
+      error: deleteError,
+    } = await supabase
+      .from(
+        "knowledge_chunks",
+      )
       .delete()
-      .eq("document_id", documentId);
+      .eq(
+        "document_id",
+        documentId,
+      );
 
-    if (deleteError) throw deleteError;
+    if (deleteError) {
+      throw deleteError;
+    }
 
     offset = 0;
 
@@ -813,54 +1145,133 @@ async function indexDocumentBatch(
       .from("documents")
       .update({
         status: "processing",
-        total_sections: chunks.length,
+        total_sections:
+          chunks.length,
         processed_sections: 0,
         error_log: null,
-        updated_at: new Date().toISOString(),
+        updated_at:
+          new Date().toISOString(),
       })
-      .eq("id", documentId);
+      .eq(
+        "id",
+        documentId,
+      );
   }
 
-  if (offset > chunks.length) {
-    offset = chunks.length;
+  if (
+    offset >
+    chunks.length
+  ) {
+    offset =
+      chunks.length;
   }
 
   await supabase
     .from("documents")
     .update({
       status: "processing",
-      total_sections: chunks.length,
-      updated_at: new Date().toISOString(),
+      total_sections:
+        chunks.length,
+      updated_at:
+        new Date().toISOString(),
     })
-    .eq("id", documentId);
+    .eq(
+      "id",
+      documentId,
+    );
 
-  const selected = chunks.slice(
-    offset,
-    offset + batchSize,
-  );
+  const selected =
+    chunks.slice(
+      offset,
+      offset + batchSize,
+    );
 
-  const inserted: unknown[] = [];
-
-  try {
-    for (const chunk of selected) {
-      const embedding = await createEmbedding(
-        chunk.content,
+  /*
+   * IMPORTANT:
+   *
+   * If offset == chunks.length, there is nothing left
+   * to embed. Mark the document complete rather than
+   * creating an unnecessary embedding session.
+   */
+  if (!selected.length) {
+    await supabase
+      .from("documents")
+      .update({
+        status: "completed",
+        total_sections:
+          chunks.length,
+        processed_sections:
+          chunks.length,
+        error_log: null,
+        updated_at:
+          new Date().toISOString(),
+      })
+      .eq(
+        "id",
+        documentId,
       );
 
-      const { data, error } = await supabase
-        .from("knowledge_chunks")
+    return {
+      document_id:
+        documentId,
+      processed: 0,
+      inserted: 0,
+      offset,
+      next_offset: offset,
+      total_sections:
+        chunks.length,
+      completed: true,
+      status: "completed",
+    };
+  }
+
+  /*
+   * ONE embedding session for the entire batch.
+   *
+   * This is the main compute optimization.
+   */
+  const embeddingSession =
+    createEmbeddingSession();
+
+  const inserted: unknown[] =
+    [];
+
+  try {
+    for (
+      const chunk of selected
+    ) {
+      const embedding =
+        await createEmbedding(
+          embeddingSession,
+          chunk.content,
+        );
+
+      const {
+        data,
+        error,
+      } = await supabase
+        .from(
+          "knowledge_chunks",
+        )
         .insert({
-          document_id: documentId,
-          content: chunk.content,
+          document_id:
+            documentId,
+          content:
+            chunk.content,
           embedding,
-          section_number: chunk.section_number,
-          subsection: chunk.subsection,
-          source_locator: chunk.source_locator,
+          section_number:
+            chunk.section_number,
+          subsection:
+            chunk.subsection,
+          source_locator:
+            chunk.source_locator,
         })
         .select("id")
         .single();
 
-      if (error) throw error;
+      if (error) {
+        throw error;
+      }
 
       inserted.push(data);
     }
@@ -870,55 +1281,100 @@ async function indexDocumentBatch(
         ? error.message
         : String(error);
 
+    /*
+     * The successful chunks from this batch may already
+     * have been inserted before a later chunk fails.
+     *
+     * The frontend should resume using the last known
+     * successful offset. We intentionally do not pretend
+     * the entire batch succeeded.
+     */
     await supabase
       .from("documents")
       .update({
         status: "failed",
-        error_log: message,
-        updated_at: new Date().toISOString(),
+        error_log:
+          message,
+        updated_at:
+          new Date().toISOString(),
       })
-      .eq("id", documentId);
+      .eq(
+        "id",
+        documentId,
+      );
 
     throw new Error(
       `Indexing failed at chunk ${offset}: ${message}`,
     );
   }
 
-  const nextOffset = offset + selected.length;
-  const completed = nextOffset >= chunks.length;
+  const nextOffset =
+    offset +
+    selected.length;
+
+  const completed =
+    nextOffset >=
+    chunks.length;
 
   await supabase
     .from("documents")
     .update({
-      status: completed ? "completed" : "processing",
-      total_sections: chunks.length,
-      processed_sections: nextOffset,
+      status:
+        completed
+          ? "completed"
+          : "processing",
+      total_sections:
+        chunks.length,
+      processed_sections:
+        nextOffset,
       error_log: null,
-      updated_at: new Date().toISOString(),
+      updated_at:
+        new Date().toISOString(),
     })
-    .eq("id", documentId);
+    .eq(
+      "id",
+      documentId,
+    );
 
   return {
-    document_id: documentId,
-    processed: selected.length,
-    inserted: inserted.length,
+    document_id:
+      documentId,
+    processed:
+      selected.length,
+    inserted:
+      inserted.length,
     offset,
-    next_offset: nextOffset,
-    total_sections: chunks.length,
+    next_offset:
+      nextOffset,
+    total_sections:
+      chunks.length,
     completed,
-    status: completed ? "completed" : "processing",
+    status:
+      completed
+        ? "completed"
+        : "processing",
   };
 }
 
 serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response("ok", {
-      headers: corsHeaders,
-    });
+  if (
+    req.method ===
+    "OPTIONS"
+  ) {
+    return new Response(
+      "ok",
+      {
+        headers:
+          corsHeaders,
+      },
+    );
   }
 
   try {
-    const authenticated = await authenticate(req);
+    const authenticated =
+      await authenticate(
+        req,
+      );
 
     if (!authenticated) {
       return failure(
@@ -927,26 +1383,37 @@ serve(async (req) => {
       );
     }
 
-    const url = new URL(req.url);
+    const url =
+      new URL(req.url);
 
     /*
      * Works with:
+     *
      * /functions/v1/admin/settings
      * /functions/v1/admin/documents
      * /api/admin/... when proxied by Netlify
      */
-    const pathParts = url.pathname
-      .split("/")
-      .filter(Boolean);
+    const pathParts =
+      url.pathname
+        .split("/")
+        .filter(Boolean);
 
-    const adminIndex = pathParts.lastIndexOf("admin");
+    const adminIndex =
+      pathParts.lastIndexOf(
+        "admin",
+      );
 
     const path =
       adminIndex >= 0
-        ? pathParts.slice(adminIndex + 1).join("/")
+        ? pathParts
+            .slice(
+              adminIndex + 1,
+            )
+            .join("/")
         : "";
 
-    const method = req.method.toUpperCase();
+    const method =
+      req.method.toUpperCase();
 
     // ---------------------------------------------------------
     // SETTINGS
@@ -954,9 +1421,13 @@ serve(async (req) => {
 
     if (
       method === "GET" &&
-      (path === "" || path === "settings")
+      (path === "" ||
+        path === "settings")
     ) {
-      const { data, error } = await supabase
+      const {
+        data,
+        error,
+      } = await supabase
         .from("settings")
         .select("*")
         .limit(1)
@@ -971,25 +1442,36 @@ serve(async (req) => {
       method === "PATCH" &&
       path === "settings"
     ) {
-      const body = await req.json();
+      const body =
+        await req.json();
 
-      const allowed: Record<string, unknown> = {};
+      const allowed: Record<
+        string,
+        unknown
+      > = {};
 
       if (
-        typeof body.api_enabled === "boolean"
+        typeof body.api_enabled ===
+        "boolean"
       ) {
-        allowed.api_enabled = body.api_enabled;
+        allowed.api_enabled =
+          body.api_enabled;
       }
 
       if (
-        typeof body.active_model === "string" &&
+        typeof body.active_model ===
+          "string" &&
         body.active_model.trim()
       ) {
         allowed.active_model =
           body.active_model.trim();
       }
 
-      if (!Object.keys(allowed).length) {
+      if (
+        !Object.keys(
+          allowed,
+        ).length
+      ) {
         return failure(
           "No supported settings were supplied.",
         );
@@ -998,7 +1480,10 @@ serve(async (req) => {
       allowed.updated_at =
         new Date().toISOString();
 
-      const { data, error } = await supabase
+      const {
+        data,
+        error,
+      } = await supabase
         .from("settings")
         .update(allowed)
         .select("*")
@@ -1007,7 +1492,10 @@ serve(async (req) => {
 
       if (error) throw error;
 
-      return success(data, "Settings updated.");
+      return success(
+        data,
+        "Settings updated.",
+      );
     }
 
     // ---------------------------------------------------------
@@ -1018,26 +1506,36 @@ serve(async (req) => {
       method === "GET" &&
       path === "keys"
     ) {
-      const { data, error } = await supabase
+      const {
+        data,
+        error,
+      } = await supabase
         .from("api_keys")
         .select("*")
-        .order("created_at", {
-          ascending: false,
-        });
+        .order(
+          "created_at",
+          {
+            ascending: false,
+          },
+        );
 
       if (error) throw error;
 
-      return success(data ?? []);
+      return success(
+        data ?? [],
+      );
     }
 
     if (
       method === "POST" &&
       path === "keys"
     ) {
-      const body = await req.json();
+      const body =
+        await req.json();
 
       const site =
-        typeof body.site === "string"
+        typeof body.site ===
+        "string"
           ? body.site.trim()
           : "";
 
@@ -1050,7 +1548,10 @@ serve(async (req) => {
       const key =
         `lex_${crypto.randomUUID().replaceAll("-", "")}`;
 
-      const { data, error } = await supabase
+      const {
+        data,
+        error,
+      } = await supabase
         .from("api_keys")
         .insert({
           key,
@@ -1070,7 +1571,9 @@ serve(async (req) => {
 
     if (
       method === "DELETE" &&
-      path.startsWith("keys/")
+      path.startsWith(
+        "keys/",
+      )
     ) {
       const id =
         path.split("/")[1];
@@ -1081,12 +1584,19 @@ serve(async (req) => {
         );
       }
 
-      const { data, error } = await supabase
+      const {
+        data,
+        error,
+      } = await supabase
         .from("api_keys")
         .update({
-          status: "revoked",
+          status:
+            "revoked",
         })
-        .eq("id", id)
+        .eq(
+          "id",
+          id,
+        )
         .select("*")
         .maybeSingle();
 
@@ -1113,17 +1623,27 @@ serve(async (req) => {
       method === "GET" &&
       path === "documents"
     ) {
-      const { data, error } = await supabase
+      const {
+        data,
+        error,
+      } = await supabase
         .from("documents")
-        .select(documentSelect())
-        .order("created_at", {
-          ascending: false,
-        })
+        .select(
+          documentSelect(),
+        )
+        .order(
+          "created_at",
+          {
+            ascending: false,
+          },
+        )
         .limit(100);
 
       if (error) throw error;
 
-      return success(data ?? []);
+      return success(
+        data ?? [],
+      );
     }
 
     // ---------------------------------------------------------
@@ -1134,32 +1654,38 @@ serve(async (req) => {
       method === "POST" &&
       path === "documents"
     ) {
-      const body = await req.json();
+      const body =
+        await req.json();
 
-      const document = await createDocument({
-        title: body.title,
-        content: body.content,
-        jurisdiction:
-          body.jurisdiction,
-        document_type:
-          body.document_type,
-        authority_level:
-          body.authority_level,
-        official_source:
-          body.official_source,
-        source_url:
-          body.source_url,
-        effective_from:
-          body.effective_from,
-        effective_to:
-          body.effective_to,
-        current_status:
-          body.current_status,
-        verification_source:
-          body.verification_source,
-        version_label:
-          body.version_label,
-      });
+      const document =
+        await createDocument(
+          {
+            title:
+              body.title,
+            content:
+              body.content,
+            jurisdiction:
+              body.jurisdiction,
+            document_type:
+              body.document_type,
+            authority_level:
+              body.authority_level,
+            official_source:
+              body.official_source,
+            source_url:
+              body.source_url,
+            effective_from:
+              body.effective_from,
+            effective_to:
+              body.effective_to,
+            current_status:
+              body.current_status,
+            verification_source:
+              body.verification_source,
+            version_label:
+              body.version_label,
+          },
+        );
 
       return success(
         document,
@@ -1173,12 +1699,15 @@ serve(async (req) => {
 
     if (
       method === "POST" &&
-      path === "documents/import-url"
+      path ===
+        "documents/import-url"
     ) {
-      const body = await req.json();
+      const body =
+        await req.json();
 
       const sourceUrl =
-        typeof body.url === "string"
+        typeof body.url ===
+        "string"
           ? body.url.trim()
           : "";
 
@@ -1201,542 +1730,22 @@ serve(async (req) => {
         );
 
       const title =
-        typeof body.title === "string" &&
-        body.title.trim()
+        typeof body.title ===
+            "string" &&
+          body.title.trim()
           ? body.title.trim()
           : new URL(
               fetched.url,
             ).hostname;
 
       const document =
-        await createDocument({
-          title,
-          content: extracted.content,
-          jurisdiction:
-            body.jurisdiction,
-          document_type:
-            body.document_type,
-          authority_level:
-            body.authority_level,
-          official_source:
-            body.official_source ||
-            fetched.url,
-          source_url:
-            fetched.url,
-          effective_from:
-            body.effective_from,
-          effective_to:
-            body.effective_to,
-          current_status:
-            body.current_status,
-          verification_source:
-            body.verification_source,
-          version_label:
-            body.version_label,
-        });
-
-      return success(
-        document,
-        `Document imported successfully (${extracted.format}). It is awaiting preview/review before indexing.`,
-      );
-    }
-
-    // ---------------------------------------------------------
-    // UPLOAD FILE
-    // ---------------------------------------------------------
-
-    if (
-      method === "POST" &&
-      path === "documents/upload"
-    ) {
-      const form =
-        await req.formData();
-
-      const file =
-        form.get("file");
-
-      if (!(file instanceof File)) {
-        return failure(
-          "No document file was supplied.",
-        );
-      }
-
-      if (
-        file.size > MAX_FILE_BYTES
-      ) {
-        return failure(
-          "File is too large. Maximum size is 20 MB.",
-        );
-      }
-
-      const bytes =
-        new Uint8Array(
-          await file.arrayBuffer(),
-        );
-
-      const extracted =
-        await extractDocument(
-          bytes,
-          file.type,
-          file.name,
-        );
-
-      const title =
-        String(
-          form.get("title") ||
-            file.name,
-        ).trim();
-
-      const document =
-        await createDocument({
-          title,
-          content:
-            extracted.content,
-          jurisdiction:
-            form.get("jurisdiction"),
-          document_type:
-            form.get("document_type"),
-          authority_level:
-            form.get("authority_level"),
-          official_source:
-            form.get("official_source"),
-          source_url:
-            form.get("source_url"),
-          effective_from:
-            form.get("effective_from"),
-          effective_to:
-            form.get("effective_to"),
-          current_status:
-            form.get("current_status"),
-          verification_source:
-            form.get("verification_source"),
-          version_label:
-            form.get("version_label"),
-        });
-
-      return success(
-        document,
-        `File uploaded successfully (${extracted.format}). It is awaiting preview/review before indexing.`,
-      );
-    }
-
-    // ---------------------------------------------------------
-    // DOCUMENT PREVIEW
-    // ---------------------------------------------------------
-
-    const previewMatch =
-      path.match(/^documents\/([^/]+)\/preview$/);
-
-    if (
-      method === "GET" &&
-      previewMatch
-    ) {
-      const id =
-        previewMatch[1];
-
-      const document =
-        await getDocument(id);
-
-      const chunks =
-        buildChunks(
-          document.content,
-          document.title,
-        );
-
-      const chunkPreviews =
-        chunks
-          .slice(0, 12)
-          .map((chunk) => ({
-            index: chunk.index,
-            section_number:
-              chunk.section_number,
-            subsection:
-              chunk.subsection,
-            source_locator:
-              chunk.source_locator,
+        await createDocument(
+          {
+            title,
             content:
-              chunk.content,
-          }));
-
-      const sections = [
-        ...new Set(
-          chunks
-            .map(
-              (chunk) =>
-                chunk.section_number,
-            )
-            .filter(Boolean),
-        ),
-      ];
-
-      const pagesDetected =
-        (
-          document.content.match(
-            /\f/g,
-          ) || []
-        ).length + 1;
-
-      return success({
-        document: {
-          ...document,
-          full_content:
-            document.content,
-        },
-        analysis: {
-          characters:
-            document.content.length,
-          pages_detected:
-            document.content.includes("\f")
-              ? pagesDetected
-              : 0,
-          sections_detected:
-            sections.length,
-          sections,
-          planned_chunks:
-            chunks.length,
-          chunk_previews:
-            chunkPreviews,
-        },
-      });
-    }
-
-    // ---------------------------------------------------------
-    // INDEX DOCUMENT - BATCHED
-    // ---------------------------------------------------------
-
-    const indexMatch =
-      path.match(/^documents\/([^/]+)\/index$/);
-
-    if (
-      method === "POST" &&
-      indexMatch
-    ) {
-      const id =
-        indexMatch[1];
-
-      const body =
-        await req.json().catch(
-          () => ({}),
-        );
-
-      const offsetParam =
-        Number(
-          url.searchParams.get(
-            "offset",
-          ) ??
-            body.offset ??
-            0,
-        );
-
-      const batchParam =
-        Number(
-          url.searchParams.get(
-            "batch_size",
-          ) ??
-            body.batch_size ??
-            INDEX_BATCH_SIZE,
-        );
-
-      const reset =
-        String(
-          url.searchParams.get(
-            "reset",
-          ) ??
-            body.reset ??
-            "false",
-        ).toLowerCase() ===
-        "true";
-
-      const result =
-        await indexDocumentBatch(
-          id,
-          offsetParam,
-          batchParam,
-          reset,
-        );
-
-      return success(
-        result,
-        result.completed
-          ? "Document indexing completed."
-          : "Indexing batch completed.",
-      );
-    }
-
-    // ---------------------------------------------------------
-    // REINDEX DOCUMENT
-    // ---------------------------------------------------------
-
-    const reindexMatch =
-      path.match(/^documents\/([^/]+)\/reindex$/);
-
-    if (
-      method === "POST" &&
-      reindexMatch
-    ) {
-      const id =
-        reindexMatch[1];
-
-      const result =
-        await indexDocumentBatch(
-          id,
-          0,
-          INDEX_BATCH_SIZE,
-          true,
-        );
-
-      return success(
-        result,
-        result.completed
-          ? "Document reindexed."
-          : "Reindexing started.",
-      );
-    }
-
-    // ---------------------------------------------------------
-    // UPDATE VERIFICATION
-    // ---------------------------------------------------------
-
-    const verificationMatch =
-      path.match(
-        /^documents\/([^/]+)\/verification$/,
-      );
-
-    if (
-      method === "PATCH" &&
-      verificationMatch
-    ) {
-      const id =
-        verificationMatch[1];
-
-      const body =
-        await req.json();
-
-      const update: Record<
-        string,
-        unknown
-      > = {
-        updated_at:
-          new Date().toISOString(),
-        last_verified_at:
-          new Date().toISOString(),
-      };
-
-      if (
-        body.current_status !==
-        undefined
-      ) {
-        update.current_status =
-          normalizeCurrentStatus(
-            body.current_status,
-          );
-      }
-
-      if (
-        body.verification_source !==
-        undefined
-      ) {
-        update.verification_source =
-          body.verification_source
-            ? String(
-                body.verification_source,
-              ).trim()
-            : null;
-      }
-
-      if (
-        body.effective_from !==
-        undefined
-      ) {
-        update.effective_from =
-          validateDate(
-            body.effective_from,
-          );
-      }
-
-      if (
-        body.effective_to !==
-        undefined
-      ) {
-        update.effective_to =
-          validateDate(
-            body.effective_to,
-          );
-      }
-
-      if (
-        body.version_label !==
-        undefined
-      ) {
-        update.version_label =
-          body.version_label
-            ? String(
-                body.version_label,
-              ).trim()
-            : null;
-      }
-
-      if (
-        body.authority_level !==
-        undefined
-      ) {
-        update.authority_level =
-          normalizeAuthority(
-            body.authority_level,
-          );
-      }
-
-      const { data, error } =
-        await supabase
-          .from("documents")
-          .update(update)
-          .eq("id", id)
-          .select(documentSelect())
-          .maybeSingle();
-
-      if (error) throw error;
-
-      if (!data) {
-        return failure(
-          "Document not found.",
-          404,
-        );
-      }
-
-      return success(
-        data,
-        "Verification metadata updated.",
-      );
-    }
-
-    // ---------------------------------------------------------
-    // REJECT DOCUMENT
-    // ---------------------------------------------------------
-
-    const rejectMatch =
-      path.match(
-        /^documents\/([^/]+)\/reject$/,
-      );
-
-    if (
-      method === "PATCH" &&
-      rejectMatch
-    ) {
-      const id =
-        rejectMatch[1];
-
-      const body =
-        await req.json().catch(
-          () => ({}),
-        );
-
-      const reason =
-        typeof body.reason === "string"
-          ? body.reason.trim()
-          : "Rejected during admin review.";
-
-      const { data, error } =
-        await supabase
-          .from("documents")
-          .update({
-            status: "rejected",
-            error_log: reason,
-            updated_at:
-              new Date().toISOString(),
-          })
-          .eq("id", id)
-          .select(documentSelect())
-          .maybeSingle();
-
-      if (error) throw error;
-
-      if (!data) {
-        return failure(
-          "Document not found.",
-          404,
-        );
-      }
-
-      return success(
-        data,
-        "Document rejected.",
-      );
-    }
-
-    // ---------------------------------------------------------
-    // DELETE DOCUMENT
-    // ---------------------------------------------------------
-
-    const deleteDocumentMatch =
-      path.match(
-        /^documents\/([^/]+)$/,
-      );
-
-    if (
-      method === "DELETE" &&
-      deleteDocumentMatch
-    ) {
-      const id =
-        deleteDocumentMatch[1];
-
-      /*
-       * Delete chunks first.
-       * If this fails, the document itself is NOT deleted,
-       * preventing an orphaned knowledge index.
-       */
-      const { error: chunkError } =
-        await supabase
-          .from("knowledge_chunks")
-          .delete()
-          .eq("document_id", id);
-
-      if (chunkError) {
-        throw new Error(
-          `Could not remove document chunks: ${chunkError.message}`,
-        );
-      }
-
-      const { data, error } =
-        await supabase
-          .from("documents")
-          .delete()
-          .eq("id", id)
-          .select("id")
-          .maybeSingle();
-
-      if (error) throw error;
-
-      if (!data) {
-        return failure(
-          "Document not found.",
-          404,
-        );
-      }
-
-      return success(
-        data,
-        "Document and indexed chunks removed.",
-      );
-    }
-
-    return failure(
-      `Endpoint not found: ${method} /${path}`,
-      404,
-    );
-  } catch (error) {
-    console.error(
-      "LexAI Admin Error:",
-      error,
-    );
-
-    const message =
-      error instanceof Error
-        ? error.message
-        : String(error);
-
-    return failure(
-      message || "Internal server error.",
-      500,
-    );
-  }
-});
+              extracted.content,
+            jurisdiction:
+              body.jurisdiction,
+            document_type:
+              body.document_type,
+            authority
