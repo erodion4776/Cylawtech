@@ -591,6 +591,9 @@ function splitLongText(
   return output;
 }
 
+// ============================================================================
+// Robust Statutory-Section Metadata Parser
+// ============================================================================
 function buildChunks(
   content: string,
   title: string,
@@ -669,92 +672,55 @@ function buildChunks(
   for (
     const line of lines
   ) {
-    const sectionMatch =
-      line.match(
-        /^(?:section|sec\.|s\.)\s*([0-9]+[A-Za-z]?(?:\([0-9A-Za-z]+\))?)/i,
-      );
+    // 1. Delimiter-first match for standard Nigerian patterns: "84.—", "84.—(1)", "84.-", "84 - (1)", "84A.—(1)", etc.
+    // Restricts plain hyphens (-) using lookahead to prevent false-positives on ordinary numbered list items.
+    const delimiterMatch = line.match(/^([0-9]+[A-Za-z]?)\s*(?:\.—|\.-|—|–|-(?=\s*(?:\(|[A-Z])))\s*(?:\(([^)]+)\))?/i);
+    
+    // 2. Standard prefix patterns like "Section 84", "s.84(1)", "S. 84", etc.
+    const standardMatch = line.match(/^(?:section|sec\.|s\.)\s*([0-9]+[A-Za-z]?)\b\s*(?:\(([^)]+)\))?/i);
+    
+    // 3. Optional Article matches (e.g. "Article 12")
+    const articleMatch = line.match(/^(?:article|art\.)\s*([0-9]+[A-Za-z]?)\b\s*(?:\(([^)]+)\))?/i);
 
-    const articleMatch =
-      line.match(
-        /^(?:article|art\.)\s*([0-9]+[A-Za-z]?)/i,
-      );
+    let isNewSection = false;
+    let detectedSection: string | null = null;
+    let detectedSubsection: string | null = null;
 
-    const numericHeading =
-      line.match(
-        /^([0-9]{1,3})\.\s+([A-Z][^.!?]{2,120})$/,
-      );
+    if (delimiterMatch) {
+      isNewSection = true;
+      detectedSection = delimiterMatch[1];
+      detectedSubsection = delimiterMatch[2] || null;
+    } else if (standardMatch) {
+      isNewSection = true;
+      detectedSection = standardMatch[1];
+      detectedSubsection = standardMatch[2] || null;
+    } else if (articleMatch) {
+      isNewSection = true;
+      detectedSection = `Article ${articleMatch[1]}`;
+      detectedSubsection = articleMatch[2] || null;
+    }
 
-    const subsectionMatch =
-      line.match(
-        /^\(([0-9]+|[a-z])\)\s*/i,
-      );
-
-    if (sectionMatch) {
+    if (isNewSection && detectedSection) {
       flush();
-
-      currentSection =
-        sectionMatch[1];
-
-      currentSubsection =
-        null;
-
+      currentSection = detectedSection;
+      currentSubsection = detectedSubsection;
       current.push(line);
-
       continue;
     }
 
-    if (articleMatch) {
-      flush();
-
-      currentSection =
-        `Article ${articleMatch[1]}`;
-
-      currentSubsection =
-        null;
-
-      current.push(line);
-
-      continue;
-    }
-
-    if (
-      numericHeading &&
-      !subsectionMatch
-    ) {
-      flush();
-
-      currentSection =
-        numericHeading[1];
-
-      currentSubsection =
-        null;
-
-      current.push(line);
-
-      continue;
-    }
-
-    if (
-      subsectionMatch &&
-      currentSection
-    ) {
-      const subsection =
-        subsectionMatch[1];
-
+    // Check if the current line transitions to a new standalone subsection under the active section
+    const subsectionMatch = line.match(/^\(([0-9]+|[a-zA-Z]+)\)\s*/i);
+    if (subsectionMatch && currentSection) {
+      const subsection = subsectionMatch[1];
       if (
         current.length &&
         currentSubsection &&
-        subsection !==
-          currentSubsection
+        subsection !== currentSubsection
       ) {
         flush();
       }
-
-      currentSubsection =
-        subsection;
-
+      currentSubsection = subsection;
       current.push(line);
-
       continue;
     }
 
@@ -1713,7 +1679,7 @@ serve(async (req) => {
               fetched.url,
             source_url:
               fetched.url,
-            effective_from:
+              effective_from:
               body.effective_from,
             effective_to:
               body.effective_to,
