@@ -592,7 +592,7 @@ function splitLongText(
 }
 
 // ============================================================================
-// Robust Section & Heading Detector with Table of Contents Guard
+// Robust Statutory Chunk Builder
 // ============================================================================
 function buildChunks(
   content: string,
@@ -602,7 +602,7 @@ function buildChunks(
 
   if (!normalized) return [];
 
-  const lines = normalized
+  const rawLines = normalized
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean);
@@ -613,16 +613,10 @@ function buildChunks(
   let currentSection: string | null = null;
   let currentSubsection: string | null = null;
 
-  // Prevent a table of contents from being treated as
-  // the actual body of a statute.
-  let inTableOfContents = false;
-  let tocCandidateCount = 0;
-
   function flush() {
     if (!current.length) return;
 
     const text = current.join("\n").trim();
-
     current = [];
 
     if (!text) return;
@@ -636,12 +630,8 @@ function buildChunks(
         subsection: currentSubsection,
         source_locator: [
           title,
-          currentSection
-            ? `Section ${currentSection}`
-            : null,
-          currentSubsection
-            ? `Subsection ${currentSubsection}`
-            : null,
+          currentSection ? `Section ${currentSection}` : null,
+          currentSubsection ? `Subsection ${currentSubsection}` : null,
         ]
           .filter(Boolean)
           .join(" > "),
@@ -650,89 +640,98 @@ function buildChunks(
     }
   }
 
-  function normalizeSectionNumber(
-    value: string,
-  ): string {
-    return value.toUpperCase();
+  function normalizeSection(value: string): string {
+    return value.toUpperCase().trim();
   }
 
-  function isLikelyTocLine(
-    line: string,
-  ): boolean {
-    // Typical contents entries have a short section number
-    // followed by a short title and sometimes a page number.
+  function normalizeSubsection(value: string): string {
+    const trimmed = value.trim();
+    // Common OCR variant: subsection (1) recognized as (I) or (l)
+    if (/^[Il]$/.test(trimmed)) return "1";
+    return trimmed.toLowerCase();
+  }
+
+  function isStandalonePageNumber(line: string): boolean {
+    // Drops isolated page numbers and page markers (e.g. "14", "Page 14", "- 14 -", "iv")
     return (
-      /^\d{1,3}[A-Za-z]?\s+.{2,100}(?:\.{2,}|\s{2,})\s*\d{1,4}$/.test(
-        line,
-      )
+      /^(?:page\s+)?\d{1,4}$/i.test(line) ||
+      /^[-—–]\s*\d{1,4}\s*[-—–]$/.test(line) ||
+      /^[ivxlcdm]{1,6}$/i.test(line)
     );
   }
 
   function detectSectionHeading(
     line: string,
+    nextLine?: string,
   ): {
     section: string;
     subsection: string | null;
   } | null {
-    // Explicit statutory prefixes.
+    // 1. Explicit statutory prefixes: "Section 84", "sec. 84A", "s. 84(1)", "S. 84A."
     const prefixed = line.match(
-      /^(?:section|sec\.|s\.)\s*(\d{1,3}[A-Za-z]?)\b\s*(?:[.,—–-]+\s*)?(?:\(([^)]+)\))?/i,
+      /^(?:section|sec\.|s\.)\s*(\d{1,3}[A-Za-z]?)\b\s*(?:[.,:;—–-]+\s*)?(?:\(([^)]+)\))?/i,
     );
-
     if (prefixed) {
       return {
-        section: normalizeSectionNumber(prefixed[1]),
-        subsection: prefixed[2] ?? null,
+        section: normalizeSection(prefixed[1]),
+        subsection: prefixed[2] ? normalizeSubsection(prefixed[2]) : null,
       };
     }
 
-    // Alphanumeric statutory sections, including 84A–84D.
-    const alpha = line.match(
+    // 2. Alphanumeric sections: "84A.", "84B.—(1)", "84C,—(I)", "84D (1)"
+    const alphaNumeric = line.match(
       /^(\d{1,3}[A-Za-z])\s*(?:[.,:;—–-]+\s*)?(?:\(([^)]+)\))?/,
     );
-
-    if (alpha) {
+    if (alphaNumeric) {
       return {
-        section: normalizeSectionNumber(alpha[1]),
-        subsection: alpha[2] ?? null,
+        section: normalizeSection(alphaNumeric[1]),
+        subsection: alphaNumeric[2] ? normalizeSubsection(alphaNumeric[2]) : null,
       };
     }
 
-    // Numeric statutory sections with punctuation or subsection markers.
-    // Examples:
-    // 84.—(1)
-    // 84,—(I)
-    // 84. — (1)
-    // 84 - (1)
-    // 84.—
-    const numeric = line.match(
-      /^(\d{1,3})\s*(?:[.,:;]+\s*[—–-]+|[—–-]+|[.,:;]+)\s*(?:\(([^)]+)\))?/,
+    // 3. Numeric sections with statutory punctuation, em-dashes, or OCR comma-dashes:
+    // Examples: "84.—(1)", "84,—(I)", "84. — (1)", "84 - (1)", "84.—"
+    const statutoryPunct = line.match(
+      /^(\d{1,3})\s*(?:[.,:;]+\s*[—–-]+|[—–-]+)\s*(?:\(([^)]+)\))?/,
     );
-
-    if (numeric) {
+    if (statutoryPunct) {
       return {
-        section: numeric[1],
-        subsection: numeric[2] ?? null,
+        section: normalizeSection(statutoryPunct[1]),
+        subsection: statutoryPunct[2] ? normalizeSubsection(statutoryPunct[2]) : null,
       };
     }
 
-    // Standalone numbered heading, e.g. "84."
-    // Accept only if the rest of the line looks like a heading,
-    // not an ordinary numbered list or a decimal number.
-    const standalone = line.match(
-      /^(\d{1,3})\.\s*(.*)$/,
+    // 4. Standalone period headings: "84. Authentication of..." or "84. (1)"
+    const standalonePeriod = line.match(
+      /^(\d{1,3})\.\s*(?:\(([^)]+)\))?(.*)$/,
     );
+    if (standalonePeriod) {
+      const rest = (standalonePeriod[3] || "").trim();
+      const inlineSub = standalonePeriod[2];
 
-    if (standalone) {
-      const rest = standalone[2].trim();
+      if (inlineSub) {
+        return {
+          section: normalizeSection(standalonePeriod[1]),
+          subsection: normalizeSubsection(inlineSub),
+        };
+      }
 
+      // Check for substantive capitalization following the section number
+      if (rest.length > 0 && /^[A-Z]/.test(rest)) {
+        return {
+          section: normalizeSection(standalonePeriod[1]),
+          subsection: null,
+        };
+      }
+
+      // Handle cases where the section number is on its own line and the next line is substantive
       if (
-        rest === "" ||
-        /^\(\s*[0-9Il]+\s*\)/i.test(rest) ||
-        /^[A-Z]/.test(rest)
+        rest === "" &&
+        nextLine &&
+        (/^\(\s*[0-9A-Za-zIl]+\s*\)/.test(nextLine) || /^[A-Z]/.test(nextLine))
       ) {
         return {
-          section: standalone[1],
+          section: normalizeSection(standalonePeriod[1]),
           subsection: null,
         };
       }
@@ -741,107 +740,42 @@ function buildChunks(
     return null;
   }
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
+  for (let i = 0; i < rawLines.length; i++) {
+    const line = rawLines[i];
+    const nextLine = rawLines[i + 1];
 
-    // Detect a table of contents from its heading.
-    if (
-      /^(table of contents|contents)\s*$/i.test(line)
-    ) {
-      inTableOfContents = true;
-      tocCandidateCount = 0;
+    // Filter out isolated page numbering
+    if (isStandalonePageNumber(line)) {
       continue;
     }
 
-    // Many statute PDFs contain a contents list with section
-    // numbers and titles before the substantive provisions.
-    if (inTableOfContents) {
-      const tocNumber = line.match(
-        /^(\d{1,3}[A-Za-z]?)\s*\.?\s*$/,
-      );
-
-      if (
-        tocNumber ||
-        isLikelyTocLine(line)
-      ) {
-        tocCandidateCount++;
-
-        // Do not let a long contents list become a section.
-        continue;
-      }
-
-      // Leave contents mode when ordinary statutory prose starts.
-      if (
-        tocCandidateCount > 0 &&
-        (
-          /^(?:part|chapter|schedule)\b/i.test(line) ||
-          /^\d{1,3}[A-Za-z]?\s*[.,—–-]/.test(line) ||
-          /^(?:section|sec\.|s\.)\s*\d/i.test(line)
-        )
-      ) {
-        inTableOfContents = false;
-      } else if (tocCandidateCount > 0) {
-        // Skip remaining contents headings until a clear
-        // statutory heading appears.
-        continue;
-      }
-    }
-
-    const heading = detectSectionHeading(line);
+    const heading = detectSectionHeading(line, nextLine);
 
     if (heading) {
-      const nextLine = lines[i + 1] ?? "";
-
-      // A bare number such as "84." is ambiguous.
-      // Require some evidence that this is an actual provision.
-      const bareNumber = /^\d{1,3}\.\s*$/.test(line);
-
-      if (
-        bareNumber &&
-        !/^\(\s*[0-9Il]+\s*\)/i.test(nextLine) &&
-        !/^[A-Z]/.test(nextLine)
-      ) {
-        current.push(line);
-        continue;
-      }
-
       flush();
-
       currentSection = heading.section;
       currentSubsection = heading.subsection;
       current.push(line);
-
       continue;
     }
 
-    // Subsections such as (1), (2), (a), and (b).
-    // Do not allow them to overwrite the parent section.
-    const subsection = line.match(
-      /^\(\s*([0-9]+|[A-Za-z])\s*\)\s*/,
-    );
+    // Subsections: (1), (2), (a), (b), (i)
+    const subMatch = line.match(/^\(\s*([0-9]+|[A-Za-z])\s*\)\s*/);
+    if (subMatch && currentSection) {
+      const nextSub = normalizeSubsection(subMatch[1]);
 
-    if (subsection && currentSection) {
-      const nextSubsection = subsection[1];
-
-      if (
-        current.length &&
-        currentSubsection &&
-        nextSubsection !== currentSubsection
-      ) {
+      if (current.length && currentSubsection !== nextSub) {
         flush();
       }
 
-      currentSubsection = nextSubsection;
+      currentSubsection = nextSub;
       current.push(line);
-
       continue;
     }
 
     current.push(line);
 
-    if (
-      current.join("\n").length >= MAX_CHUNK_CHARS
-    ) {
+    if (current.join("\n").length >= MAX_CHUNK_CHARS) {
       flush();
     }
   }
@@ -1942,9 +1876,20 @@ serve(async (req) => {
           document.title,
         );
 
+      const sectionQuery = url.searchParams.get("section")?.trim().toUpperCase() || null;
+
+      // Filter based on the requested section, or return the default preview slice of 12 chunks
+      let filteredChunks = chunks;
+      if (sectionQuery) {
+        filteredChunks = chunks.filter(
+          (chunk) => chunk.section_number?.toUpperCase().trim() === sectionQuery
+        );
+      } else {
+        filteredChunks = chunks.slice(0, 12);
+      }
+
       const chunkPreviews =
-        chunks
-          .slice(0, 12)
+        filteredChunks
           .map(
             (chunk) => ({
               index:
@@ -1999,6 +1944,8 @@ serve(async (req) => {
           sections,
           planned_chunks:
             chunks.length,
+          filter_applied: sectionQuery,
+          filtered_chunks_count: chunkPreviews.length,
           chunk_previews:
             chunkPreviews,
         },
