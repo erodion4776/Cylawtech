@@ -136,7 +136,7 @@ async function retrieveStatutoryContext(
     }
   }
 
-  // 2. VECTOR SEARCH (Top matches)
+  // 2. VECTOR SEARCH (Semantic Fallback)
   try {
     const queryVector = await createQueryEmbedding(query);
     const { data: vectorMatches } = await supabase.rpc("match_legal_chunks", {
@@ -176,12 +176,12 @@ async function retrieveStatutoryContext(
 }
 
 function buildLegalSystemPrompt(jurisdiction: string): string {
-  return `You are LexAI, an elite statutory intelligence assistant for ${jurisdiction.toUpperCase()} law.
+  return `You are LexAI, an authoritative statutory intelligence assistant for ${jurisdiction.toUpperCase()} law.
 
 RULES:
 1. STRICT GROUNDING: Explain the legal position based on the provided STATUTORY CONTEXT. Do not fabricate sections or rules.
 2. WHEN SECTION 84 IS QUERIED: Detail Subsection (1) admissibility, (2)(a)-(d) operating conditions, and (4) certificate requirements.
-3. CONCISE & COMPLETE: Present clear, authoritative legal analysis without trailing off.`;
+3. CONCISE & COMPLETE: Present clear, authoritative legal analysis.`;
 }
 
 function formatContextPayload(chunks: RetrievedChunk[]): string {
@@ -214,20 +214,35 @@ async function generateLegalAnswer(
   const openAiKey = rawOpenAiKey.trim().replace(/^["']|["']$/g, "");
 
   if (!groqKey && !openAiKey) {
-    throw new Error(
-      "Missing GROQ_API_KEY. Please add GROQ_API_KEY in Supabase Project Settings -> Edge Functions -> Secrets."
-    );
+    throw new Error("Missing GROQ_API_KEY in Supabase Edge Functions secrets.");
   }
+
+  // CRITICAL FIX: Sanitize history so only pure role & content strings are sent to Groq
+  const sanitizedHistory = history
+    .filter(
+      (m: any) =>
+        m &&
+        typeof m.content === "string" &&
+        (m.role === "user" || m.role === "assistant")
+    )
+    .slice(-3)
+    .map((m: any) => ({
+      role: m.role as "user" | "assistant",
+      content: String(m.content),
+    }));
 
   const messages = [
     { role: "system", content: systemPrompt },
-    ...history.slice(-2),
-    { role: "user", content: `STATUTORY CONTEXT:\n${contextPayload}\n\nUSER QUESTION:\n${userQuery}` },
+    ...sanitizedHistory,
+    {
+      role: "user",
+      content: `STATUTORY CONTEXT:\n${contextPayload}\n\nUSER QUESTION:\n${userQuery}`,
+    },
   ];
 
   let lastErrorText = "";
 
-  // 1. Try Groq (Llama-3.3-70b -> Llama-3.1-8b high quota)
+  // 1. Try Groq (Llama-3.3-70b -> Llama-3.1-8b)
   if (groqKey) {
     const modelsToTry = [
       "llama-3.3-70b-versatile",
@@ -246,7 +261,7 @@ async function generateLegalAnswer(
             model,
             messages,
             temperature: 0.1,
-            max_tokens: 1500, // Stays well within 6,000 TPM limit
+            max_tokens: 1500,
           }),
         });
 
@@ -260,12 +275,11 @@ async function generateLegalAnswer(
         console.error(lastErrorText);
       } catch (err: any) {
         lastErrorText = `Groq fetch error: ${err.message}`;
-        console.warn(`Model ${model} failed, attempting fallback...`);
       }
     }
   }
 
-  // 2. Fallback to OpenAI if configured
+  // 2. Fallback to OpenAI
   if (openAiKey) {
     try {
       const resp = await fetch("https://api.openai.com/v1/chat/completions", {
