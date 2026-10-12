@@ -5,7 +5,7 @@ import {
   Scale, Menu, X, Home, Info, Mail,
   Lock, Sparkles, ChevronDown, Copy, Check, Pencil,
   LogOut, User as UserIcon, Paperclip, FileText, Image as ImageIcon,
-  Mic, Square, Volume2
+  Mic, Square, Volume2, ExternalLink, ShieldCheck, AlertTriangle, Globe
 } from 'lucide-react';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import { cn } from '../lib/utils';
@@ -14,9 +14,13 @@ import { supabase } from '../lib/supabaseClient';
 import Markdown from 'react-markdown';
 
 const API_BASE = '/api/chat';
-const DAILY_LIMIT = 10;
+const VERIFY_API = '/api/verify';
+const DAILY_LIMIT = 15;
 
-// Safe Cross-Origin PDF Text Extractor
+// ============================================================
+// FILE PROCESSING HELPERS
+// ============================================================
+
 async function extractPdfText(file: File): Promise<string> {
   if (!(window as any).pdfjsLib) {
     await new Promise<void>((resolve, reject) => {
@@ -58,13 +62,12 @@ async function extractPdfText(file: File): Promise<string> {
   }
 
   if (!fullText.trim()) {
-    throw new Error("This PDF contains scanned images without selectable text. Please upload photos of the pages as images for visual review.");
+    throw new Error("This PDF contains scanned images without selectable text. OCR is required.");
   }
 
   return fullText.trim();
 }
 
-// Image Resizer for Vision AI
 async function processImageFile(file: File): Promise<{ base64: string; mimeType: string }> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -102,7 +105,6 @@ async function processImageFile(file: File): Promise<{ base64: string; mimeType:
   });
 }
 
-// Convert audio blob to base64
 async function blobToBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -113,6 +115,20 @@ async function blobToBase64(blob: Blob): Promise<string> {
     reader.onerror = reject;
     reader.readAsDataURL(blob);
   });
+}
+
+// ============================================================
+// INTERFACES
+// ============================================================
+
+interface Citation {
+  text: string;
+  url: string | null;
+  document_title?: string;
+  section?: string | null;
+  subsection?: string | null;
+  status?: string;
+  similarity?: number;
 }
 
 interface AttachmentData {
@@ -127,7 +143,6 @@ interface Conversation {
   id: string;
   title: string;
   jurisdiction: string;
-  mode: string;
   updated_at: string;
 }
 
@@ -135,10 +150,21 @@ interface Message {
   id?: string;
   role: 'user' | 'assistant';
   content: string;
+  citations?: Citation[];
+  verified_site?: {
+    url: string;
+    status: string;
+    confidence: number;
+    warnings?: string[];
+  };
 }
 
+// ============================================================
+// MAIN COMPONENT
+// ============================================================
+
 const LexAI: React.FC = () => {
-  useDocumentTitle('Lex AI - Nigerian & US Legal Assistant');
+  useDocumentTitle('LexAI - Statutory Intelligence & Verification');
   const navigate = useNavigate();
 
   const [user, setUser] = useState<any>(null);
@@ -147,24 +173,22 @@ const LexAI: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [jurisdiction, setJurisdiction] = useState<'nigeria' | 'us'>('nigeria');
-  const [mode, setMode] = useState<'prep' | 'training' | 'practice'>('prep');
+  const [jurisdiction, setJurisdiction] = useState<'nigeria' | 'us' | 'global'>('nigeria');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [showJurisdictionPicker, setShowJurisdictionPicker] = useState(false);
 
-  // Attachment State
+  // Attachments & Voice
   const [attachment, setAttachment] = useState<AttachmentData | null>(null);
   const [isProcessingFile, setIsProcessingFile] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Live Voice Recording State
   const [isRecording, setIsRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const recordingTimerRef = useRef<any>(null);
 
-  // Database usage tracking
+  // Usage & Paywall
   const [dbUsageCount, setDbUsageCount] = useState(0);
   const [showPaywall, setShowPaywall] = useState(false);
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
@@ -176,8 +200,11 @@ const LexAI: React.FC = () => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, []);
 
-  useEffect(() => { scrollToBottom(); }, [messages, isLoading, scrollToBottom]);
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages, isLoading, scrollToBottom]);
 
+  // Auth & Init
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (user) {
@@ -190,11 +217,13 @@ const LexAI: React.FC = () => {
   const fetchConversations = async (userId: string) => {
     try {
       const res = await fetch(`${API_BASE}?action=list&user_id=${userId}`);
-      const data = await res.json();
-      setConversations(data.conversations || []);
-      if (data.usage) {
-        setDbUsageCount(data.usage.count || 0);
-        if (data.usage.count >= DAILY_LIMIT) setShowPaywall(true);
+      if (res.ok) {
+        const data = await res.json();
+        setConversations(data.conversations || []);
+        if (data.usage) {
+          setDbUsageCount(data.usage.count || 0);
+          if (data.usage.count >= DAILY_LIMIT) setShowPaywall(true);
+        }
       }
     } catch { /* silent */ }
   };
@@ -225,13 +254,15 @@ const LexAI: React.FC = () => {
 
   const deleteConversation = async (convId: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    await fetch(`${API_BASE}?action=delete`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ conversation_id: convId }),
-    });
-    if (activeConvId === convId) startNewChat();
-    if (user) fetchConversations(user.id);
+    try {
+      await fetch(`${API_BASE}?action=delete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conversation_id: convId }),
+      });
+      if (activeConvId === convId) startNewChat();
+      if (user) fetchConversations(user.id);
+    } catch { /* silent */ }
   };
 
   const handleSignOut = async () => {
@@ -239,7 +270,7 @@ const LexAI: React.FC = () => {
     navigate('/auth');
   };
 
-  // ==================== LIVE VOICE RECORDER ====================
+  // ==================== VOICE RECORDER ====================
   const startVoiceRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -250,32 +281,26 @@ const LexAI: React.FC = () => {
         mimeType = 'audio/webm;codecs=opus';
       } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
         mimeType = 'audio/mp4';
-      } else if (MediaRecorder.isTypeSupported('audio/aac')) {
-        mimeType = 'audio/aac';
       }
 
       const mediaRecorder = new MediaRecorder(stream, { mimeType });
       mediaRecorderRef.current = mediaRecorder;
 
       mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
-        }
+        if (event.data.size > 0) audioChunksRef.current.push(event.data);
       };
 
       mediaRecorder.onstop = async () => {
         const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
         const base64 = await blobToBase64(audioBlob);
-        
         stream.getTracks().forEach((track) => track.stop());
 
-        const ext = mimeType.includes('mp4') || mimeType.includes('aac') ? 'm4a' : 'webm';
-
+        const ext = mimeType.includes('mp4') ? 'm4a' : 'webm';
         setAttachment({
           name: `voicenote.${ext}`,
           type: 'audio',
-          mimeType: mimeType,
-          base64: base64,
+          mimeType,
+          base64,
         });
 
         setIsRecording(false);
@@ -296,9 +321,9 @@ const LexAI: React.FC = () => {
           return prev + 1;
         });
       }, 1000);
-    } catch (err: any) {
-      console.error("Microphone access error:", err);
-      alert("Microphone access is required to record voice notes. Please enable microphone permissions in your browser.");
+    } catch (err) {
+      console.error("Mic error:", err);
+      alert("Microphone permission is required to record voice notes.");
     }
   };
 
@@ -319,13 +344,13 @@ const LexAI: React.FC = () => {
     audioChunksRef.current = [];
   };
 
-  // Handle Audio, PDF, Image File Upload
+  // ==================== FILE UPLOADS ====================
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     if (file.size > 20 * 1024 * 1024) {
-      alert("Please upload a file smaller than 20MB.");
+      alert("File size exceeds 20MB limit.");
       return;
     }
 
@@ -338,7 +363,7 @@ const LexAI: React.FC = () => {
           name: file.name,
           type: 'audio',
           mimeType: file.type || 'audio/mp3',
-          base64: base64,
+          base64,
         });
       } else if (file.type.startsWith('image/')) {
         const { base64, mimeType } = await processImageFile(file);
@@ -366,7 +391,6 @@ const LexAI: React.FC = () => {
         });
       }
     } catch (err: any) {
-      console.error("File processing error:", err);
       alert(err.message || "Failed to process file.");
     } finally {
       setIsProcessingFile(false);
@@ -374,6 +398,7 @@ const LexAI: React.FC = () => {
     }
   };
 
+  // ==================== SEND MESSAGE / VERIFY ====================
   const sendMessage = async (overrideMessage?: string) => {
     const textToSend = (overrideMessage || input).trim();
     if ((!textToSend && !attachment) || isLoading) return;
@@ -389,57 +414,116 @@ const LexAI: React.FC = () => {
     if (inputRef.current) inputRef.current.style.height = '48px';
 
     let displayMsg = textToSend;
-    if (currentAttachment && currentAttachment.type === 'audio') {
-      displayMsg = `🎙️ *Transcribing voice note...*${textToSend ? `\n\n${textToSend}` : ''}`;
+    if (currentAttachment?.type === 'audio') {
+      displayMsg = `🎙️ *Voice Note attached...*${textToSend ? `\n\n${textToSend}` : ''}`;
     } else if (currentAttachment) {
       displayMsg = `${textToSend}\n\n📎 *Attached: ${currentAttachment.name}*`;
     }
 
-    const userMessageIndex = messages.length;
     const updatedMessages: Message[] = [...messages, { role: 'user', content: displayMsg }];
     setMessages(updatedMessages);
     setIsLoading(true);
 
+    // Detect if message is a URL for site verification
+    const urlMatch = textToSend.match(/^https?:\/\/[^\s]+$/i);
+    const isUrlVerification = Boolean(urlMatch);
+
     try {
+      if (isUrlVerification) {
+        // Send to verify endpoint
+        const verifyRes = await fetch(VERIFY_API, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            mode: 'verify_site',
+            url: textToSend,
+            jurisdiction,
+          }),
+        });
+
+        const verifyData = await verifyRes.json();
+        if (verifyData.success) {
+          const statusLabel = verifyData.verification_status.toUpperCase();
+          const answerContent = `### Site Verification Report: [${verifyData.final_url}](${verifyData.final_url})
+**Status**: \`${statusLabel}\` (Confidence: ${(verifyData.confidence_score * 100).toFixed(1)}%)
+
+**Findings Summary**:
+- **Analyzed Blocks**: ${verifyData.chunks_analyzed}
+- **Confirmed against Knowledge Base**: ${verifyData.chunks_confirmed}
+${verifyData.warnings?.length ? `\n**Warnings:**\n${verifyData.warnings.map((w: string) => `- ${w}`).join('\n')}` : ''}
+`;
+
+          const citations: Citation[] = (verifyData.findings || [])
+            .filter((f: any) => f.citation_url || f.kb_locator)
+            .map((f: any) => ({
+              text: f.kb_locator || 'Verified Provision',
+              url: f.citation_url,
+              status: f.kb_status || 'verified',
+              similarity: f.similarity,
+            }));
+
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: 'assistant',
+              content: answerContent,
+              citations,
+              verified_site: {
+                url: verifyData.final_url,
+                status: verifyData.verification_status,
+                confidence: verifyData.confidence_score,
+                warnings: verifyData.warnings,
+              },
+            },
+          ]);
+          setIsLoading(false);
+          return;
+        }
+      }
+
+      // Standard Chat / Retrieval
       const res = await fetch(API_BASE, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: textToSend,
-          messages: updatedMessages,
+          history: updatedMessages.slice(-6),
           conversation_id: activeConvId,
           jurisdiction: jurisdiction === 'nigeria' ? 'Nigerian Law' : 'US Federal Law',
           user_id: user?.id || 'authenticated_user',
           attachment: currentAttachment,
         }),
       });
+
       const data = await res.json();
 
       if (data.paywall) setShowPaywall(true);
       if (data.usage) setDbUsageCount(data.usage.count);
 
-      if (data.transcription) {
-        setMessages((prev) => {
-          const clone = [...prev];
-          if (clone[userMessageIndex]) {
-            clone[userMessageIndex] = {
-              ...clone[userMessageIndex],
-              content: `🎙️ *Voice Note:* "${data.transcription}"${textToSend ? `\n\n${textToSend}` : ''}`,
-            };
-          }
-          return clone;
-        });
-      }
+      const assistantReply = data.answer || data.response || data.error || 'No response generated.';
+      const citations: Citation[] = Array.isArray(data.citations) ? data.citations : [];
 
-      if (data.error && !data.response) {
-        setMessages(prev => [...prev, { role: 'assistant', content: data.error }]);
-      } else {
-        setMessages(prev => [...prev, { role: 'assistant', content: data.response }]);
-        if (data.conversation_id && !activeConvId) setActiveConvId(data.conversation_id);
-        if (user) fetchConversations(user.id);
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'assistant',
+          content: assistantReply,
+          citations,
+        },
+      ]);
+
+      if (data.conversation_id && !activeConvId) {
+        setActiveConvId(data.conversation_id);
       }
-    } catch {
-      setMessages(prev => [...prev, { role: 'assistant', content: 'Unable to connect to Lex AI. Please check your internet connection.' }]);
+      if (user) fetchConversations(user.id);
+    } catch (err) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'assistant',
+          content: 'Unable to connect to LexAI. Please check your network connection and try again.',
+        },
+      ]);
     } finally {
       setIsLoading(false);
     }
@@ -452,12 +536,11 @@ const LexAI: React.FC = () => {
   };
 
   const handleEdit = (text: string) => {
-    const cleanText = text.split('\n\n📎')[0].split('🎙️ *Voice Note:*')[0];
-    setInput(cleanText.trim());
+    const clean = text.split('\n\n📎')[0].split('🎙️ *Voice Note:*')[0];
+    setInput(clean.trim());
     if (inputRef.current) {
       inputRef.current.focus();
       inputRef.current.style.height = '48px';
-      inputRef.current.style.height = Math.min(inputRef.current.scrollHeight, 112) + 'px';
     }
   };
 
@@ -484,23 +567,12 @@ const LexAI: React.FC = () => {
               <div className="w-12 h-12 bg-blue-600/10 text-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-4">
                 <Lock size={24} />
               </div>
-              <h2 className="text-xl font-black text-slate-900 dark:text-white mb-2">Daily Inquiry Limit Reached</h2>
+              <h2 className="text-xl font-black text-slate-900 dark:text-white mb-2">Daily Quota Reached</h2>
               <p className="text-slate-500 dark:text-slate-400 text-xs sm:text-sm mb-6 leading-relaxed">
-                You have reached your limit of {DAILY_LIMIT} free inquiries for today. Your limit resets automatically tomorrow.
+                You have reached your free daily allocation of {DAILY_LIMIT} inquiries.
               </p>
-              <div className="grid grid-cols-2 gap-3 mb-6">
-                <div className="p-4 rounded-2xl bg-slate-50 dark:bg-[#252525] border border-slate-200 dark:border-slate-700 text-left">
-                  <p className="text-[9px] font-bold text-blue-600 uppercase">Monthly Practice</p>
-                  <h4 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white">$29<span className="text-[10px] font-normal text-slate-400">/mo</span></h4>
-                </div>
-                <div className="p-4 rounded-2xl bg-[#171717] text-white text-left relative overflow-hidden">
-                  <p className="text-[9px] font-bold text-[#B4975A] uppercase">Annual Counsel</p>
-                  <h4 className="text-lg sm:text-xl font-black">$249<span className="text-[10px] font-normal text-slate-400">/yr</span></h4>
-                  <Sparkles size={28} className="absolute -right-1 -bottom-1 opacity-10" />
-                </div>
-              </div>
               <button onClick={() => navigate('/contact')} className="w-full py-3.5 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl font-bold text-sm transition-all shadow-lg">
-                Upgrade for Unlimited Access
+                Upgrade for Unlimited Research
               </button>
               <button onClick={() => setShowPaywall(false)} className="mt-3 text-xs text-slate-400 hover:text-slate-600">
                 Dismiss
@@ -581,6 +653,7 @@ const LexAI: React.FC = () => {
 
                 {[
                   { to: '/', label: 'Home Page', icon: Home },
+                  { to: '/saas-admin', label: 'Counsel Admin', icon: ShieldCheck },
                   { to: '/how-it-works', label: 'How It Works', icon: Sparkles },
                   { to: '/about', label: 'About LexAI', icon: Info },
                   { to: '/contact', label: 'Contact Support', icon: Mail }
@@ -653,7 +726,7 @@ const LexAI: React.FC = () => {
                 ].map((j) => (
                   <button
                     key={j.value}
-                    onClick={() => setJurisdiction(j.value)}
+                    onClick={() => { setJurisdiction(j.value); setShowJurisdictionPicker(false); }}
                     className={cn(
                       'px-3 py-2.5 rounded-xl text-xs font-semibold transition-all active:scale-95',
                       jurisdiction === j.value
@@ -666,13 +739,6 @@ const LexAI: React.FC = () => {
                 ))}
               </div>
             </div>
-
-            <button
-              onClick={() => setShowJurisdictionPicker(false)}
-              className="w-full py-2 text-xs font-bold text-slate-400 hover:text-slate-600 transition-colors"
-            >
-              Done
-            </button>
           </motion.div>
         )}
       </AnimatePresence>
@@ -690,19 +756,19 @@ const LexAI: React.FC = () => {
             </div>
             
             <h2 className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white mb-2 tracking-tight">
-              Hi, I’m Lex AI. How can I help you today?
+              LexAI Legal Intelligence
             </h2>
             
             <p className="text-slate-500 dark:text-slate-400 text-xs sm:text-sm mb-7 leading-relaxed max-w-md">
-              Your AI legal assistant. Speak a voice note, upload contracts and photos, paste web links, or ask legal questions with practical guidance.
+              Ask statutory questions, paste legal website URLs for direct verification, or upload documents for admissibility review.
             </p>
 
             <div className="w-full space-y-2.5">
               {[
-                'Record or upload a voice note describing your issue.',
-                'Audit an attached contract or uploaded image.',
-                'Help me understand a Nigerian or US legal dispute.',
-                'Draft a contract or non-disclosure agreement.',
+                'What are the requirements for computer-generated evidence under Section 84?',
+                'Verify the legal text of Section 83 of the Evidence Act 2011.',
+                'Paste any legal URL here to cross-check against verified statutes.',
+                'Explain competence of witnesses under Section 180.',
               ].map((suggestion) => (
                 <button
                   key={suggestion}
@@ -719,7 +785,7 @@ const LexAI: React.FC = () => {
             {messages.map((msg, idx) => {
               const isUser = msg.role === 'user';
               return (
-                <div key={idx} className="space-y-1 group">
+                <div key={idx} className="space-y-2 group">
                   <div className={cn('flex gap-3', isUser ? 'justify-end' : 'justify-start')}>
                     {!isUser && (
                       <div className="w-7 h-7 bg-slate-900 dark:bg-white/10 rounded-full flex items-center justify-center shrink-0 mt-1">
@@ -728,7 +794,7 @@ const LexAI: React.FC = () => {
                     )}
                     <div
                       className={cn(
-                        'max-w-[85%] rounded-2xl px-5 py-3.5 text-sm leading-relaxed select-text flex flex-col',
+                        'max-w-[88%] rounded-2xl px-5 py-3.5 text-sm leading-relaxed select-text flex flex-col',
                         isUser
                           ? 'bg-slate-900 dark:bg-blue-600 text-white rounded-tr-md'
                           : 'bg-slate-100 dark:bg-white/5 text-slate-800 dark:text-slate-200 border border-slate-200/50 dark:border-white/5 rounded-tl-md shadow-xs'
@@ -751,9 +817,6 @@ const LexAI: React.FC = () => {
                               td: ({node, ...props}) => (
                                 <td className="px-4 py-2 border-t border-slate-100 dark:border-white/5 text-slate-600 dark:text-slate-400 whitespace-normal" {...props} />
                               ),
-                              pre: ({node, ...props}) => (
-                                <div className="overflow-x-auto w-full bg-slate-950 text-slate-100 p-4 rounded-xl my-4 font-mono text-xs" {...props} />
-                              ),
                               code: ({node, ...props}) => (
                                 <code className="bg-slate-200/60 dark:bg-white/10 px-1 py-0.5 rounded font-mono text-[13px] text-slate-900 dark:text-slate-200 font-medium" {...props} />
                               )
@@ -763,6 +826,53 @@ const LexAI: React.FC = () => {
                           </Markdown>
                         </div>
                       )}
+
+                      {/* ==================== CLICKABLE CITATIONS SECTION ==================== */}
+                      {!isUser && msg.citations && msg.citations.length > 0 && (
+                        <div className="mt-4 pt-3 border-t border-slate-200/50 dark:border-white/10 space-y-1.5">
+                          <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1">
+                            <ShieldCheck size={12} className="text-emerald-500" />
+                            Verified Statutory Authorities:
+                          </p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {msg.citations.map((cite, cIdx) => (
+                              <div
+                                key={cIdx}
+                                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-200/70 dark:bg-white/10 border border-slate-300/60 dark:border-white/10 text-[11px] font-medium"
+                              >
+                                {cite.url ? (
+                                  <a
+                                    href={cite.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1 font-semibold"
+                                  >
+                                    <span>{cite.text}</span>
+                                    <ExternalLink size={10} className="shrink-0" />
+                                  </a>
+                                ) : (
+                                  <span className="text-slate-700 dark:text-slate-300">{cite.text}</span>
+                                )}
+
+                                {cite.status && (
+                                  <span
+                                    className={cn(
+                                      'text-[8px] font-bold px-1.5 py-0.2 rounded uppercase ml-1',
+                                      cite.status === 'verified'
+                                        ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400'
+                                        : cite.status === 'repealed'
+                                        ? 'bg-rose-500/20 text-rose-600 dark:text-rose-400'
+                                        : 'bg-amber-500/20 text-amber-600 dark:text-amber-400'
+                                    )}
+                                  >
+                                    {cite.status}
+                                  </span>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -770,7 +880,6 @@ const LexAI: React.FC = () => {
                     <button
                       onClick={() => handleCopy(msg.content, idx)}
                       className="p-1 rounded-md hover:bg-slate-100 dark:hover:bg-white/5 hover:text-slate-600 dark:hover:text-slate-300 transition-colors flex items-center gap-1 text-[10px] font-bold bg-transparent border-0 cursor-pointer"
-                      title="Copy message text"
                     >
                       {copiedIdx === idx ? (
                         <>
@@ -789,7 +898,6 @@ const LexAI: React.FC = () => {
                       <button
                         onClick={() => handleEdit(msg.content)}
                         className="p-1 rounded-md hover:bg-slate-100 dark:hover:bg-white/5 hover:text-slate-600 dark:hover:text-slate-300 transition-colors flex items-center gap-1 text-[10px] font-bold bg-transparent border-0 cursor-pointer"
-                        title="Edit and resubmit message"
                       >
                         <Pencil size={11} />
                         <span>Edit</span>
@@ -811,7 +919,7 @@ const LexAI: React.FC = () => {
                 <div className="bg-slate-100 dark:bg-white/5 border border-slate-200/50 dark:border-white/5 rounded-2xl rounded-tl-md px-4 py-3.5 shadow-xs">
                   <div className="flex items-center gap-2">
                     <Loader2 size={14} className="animate-spin text-blue-600 dark:text-[#B4975A]" />
-                    <span className="text-xs text-slate-500 dark:text-slate-400">Lex AI is researching & auditing...</span>
+                    <span className="text-xs text-slate-500 dark:text-slate-400">LexAI is searching statutory library & verifying citations...</span>
                   </div>
                 </div>
               </motion.div>
@@ -821,11 +929,11 @@ const LexAI: React.FC = () => {
         )}
       </div>
 
-      {/* ==================== INPUT DOCK WITH LIVE VOICE RECORDER ==================== */}
+      {/* INPUT DOCK */}
       <div className="shrink-0 px-3 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-white dark:bg-[#171717] border-t border-slate-200/50 dark:border-white/5 z-30">
         <div className="max-w-3xl mx-auto">
           
-          {/* ATTACHMENT PREVIEW BADGE */}
+          {/* ATTACHMENT BADGE */}
           <AnimatePresence>
             {attachment && !isRecording && (
               <motion.div
@@ -848,7 +956,6 @@ const LexAI: React.FC = () => {
                 <button
                   onClick={() => setAttachment(null)}
                   className="p-1 text-slate-400 hover:text-rose-500 bg-transparent border-0 cursor-pointer"
-                  title="Remove attachment"
                 >
                   <X size={14} />
                 </button>
@@ -883,7 +990,6 @@ const LexAI: React.FC = () => {
           ) : (
             <div className="relative bg-slate-100 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl focus-within:border-slate-400 dark:focus-within:border-white/20 focus-within:bg-white dark:focus-within:bg-white/10 transition-all flex items-center">
               
-              {/* Hidden File Input */}
               <input
                 type="file"
                 ref={fileInputRef}
@@ -892,7 +998,6 @@ const LexAI: React.FC = () => {
                 className="hidden"
               />
 
-              {/* Attachment Picker Button */}
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
@@ -903,7 +1008,6 @@ const LexAI: React.FC = () => {
                 {isProcessingFile ? <Loader2 size={18} className="animate-spin text-blue-500" /> : <Paperclip size={18} />}
               </button>
 
-              {/* Live Microphone Recording Button */}
               <button
                 type="button"
                 onClick={startVoiceRecording}
@@ -923,7 +1027,7 @@ const LexAI: React.FC = () => {
                     sendMessage();
                   }
                 }}
-                placeholder="Ask a legal question, record voice, or attach document…"
+                placeholder="Ask statutory question, paste website URL to verify, or record voice…"
                 rows={1}
                 className="w-full py-3.5 pr-12 pl-2 bg-transparent text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 outline-none resize-none max-h-28"
                 style={{ minHeight: '48px' }}
@@ -951,8 +1055,8 @@ const LexAI: React.FC = () => {
           )}
 
           <div className="flex flex-col sm:flex-row justify-between items-center px-1 mt-2 text-[10px] text-slate-400 dark:text-slate-500 gap-1 text-center sm:text-left leading-tight">
-            <span>{messagesRemaining} verified inquiries left today.</span>
-            <span>Lex AI provides legal information, not legal representation. Verify important advice with a lawyer.</span>
+            <span>{messagesRemaining} verified statutory inquiries left today.</span>
+            <span>LexAI provides grounded statutory analysis. Verify crucial legal steps with qualified counsel.</span>
           </div>
         </div>
       </div>
