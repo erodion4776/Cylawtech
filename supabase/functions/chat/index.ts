@@ -1,1164 +1,550 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.8";
-import Groq from "https://esm.sh/groq-sdk@0.5.0";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-api-key, x-admin-key",
+    "authorization, x-client-info, apikey, content-type, x-user-id, x-api-key",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Content-Type": "application/json",
 };
 
-const groqApiKey = Deno.env.get("GROQ_API_KEY") || "";
-const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
-const supabaseServiceKey =
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
+const SUPABASE_SERVICE_ROLE_KEY =
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 
-const groq = new Groq({
-  apiKey: groqApiKey,
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+  auth: {
+    persistSession: false,
+    autoRefreshToken: false,
+  },
 });
 
-const supabase = createClient(
-  supabaseUrl,
-  supabaseServiceKey
-);
+const EMBEDDING_DIM = 384;
 
 // ============================================================
-// LEXAI EMBEDDING MODEL
-// IMPORTANT:
-// This MUST match the model used to create the existing
-// 384-dimensional knowledge_chunks embeddings.
+// HELPERS
 // ============================================================
 
-// @ts-ignore
-const embeddingModel = new Supabase.ai.Session("gte-small");
+function json(data: unknown, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: corsHeaders,
+  });
+}
 
-// ============================================================
-// Generate a 384-dimensional embedding using the SAME model
-// used by the existing legal knowledge base.
-// ============================================================
+function errorResponse(
+  message: string,
+  status = 500,
+  extra: Record<string, unknown> = {}
+) {
+  return json({ error: message, ...extra }, status);
+}
 
-async function getEmbedding(
-  text: string
-): Promise<number[] | null> {
-  try {
-    const cleanedText = text
-      .replace(/\s+/g, " ")
-      .trim()
-      .substring(0, 1000);
+function cleanString(value: unknown, fallback = ""): string {
+  return typeof value === "string" ? value.trim() : fallback;
+}
 
-    if (!cleanedText) {
-      return null;
-    }
-
-    // @ts-ignore
-    const rawEmbedding = await embeddingModel.run(cleanedText, {
-      mean_pool: true,
-      normalize: true,
-    });
-
-    const embedding = Array.from(rawEmbedding) as number[];
-
-    if (embedding.length !== 384) {
-      console.error(
-        `Unexpected embedding dimension: ${embedding.length}`
-      );
-
-      return null;
-    }
-
-    return embedding;
-  } catch (error) {
-    console.error(
-      "LexAI embedding generation error:",
-      error
-    );
-
-    return null;
-  }
+function normalizeJurisdiction(value: unknown): string {
+  const v = cleanString(value, "nigeria").toLowerCase();
+  const map: Record<string, string> = {
+    ng: "nigeria",
+    nigeria: "nigeria",
+    "nigerian law": "nigeria",
+    us: "us",
+    usa: "us",
+    "united states": "us",
+    uk: "uk",
+    "united kingdom": "uk",
+    global: "global",
+  };
+  return map[v] || v;
 }
 
 // ============================================================
-// Section-Aware Query Detection
-// Extracts statutory section references from the user's question
-// deterministically using regex.
+// STATUTORY QUERY DETECTION
 // ============================================================
 
-function extractSectionReferences(message: string): string[] {
+function extractSectionReferences(query: string): string[] {
   const sections = new Set<string>();
-  const lower = message.toLowerCase();
-
-  const normalize = (s: string) => s.toUpperCase().trim();
-
-  // 1. Match range patterns like "sections 84A to 84D", "84A-84D", "84A–84D"
-  const suffixRangeRegex = /\b(?:sections|ss\.?)\s*([0-9]+)([a-z])\s*(?:to|and|-|–)\s*\1([a-z])\b/gi;
+  const regex = /\b(?:sections?|sec\.|s\.|articles?|art\.)\s*(\d+[A-Za-z]*)\b/gi;
   let match;
-  while ((match = suffixRangeRegex.exec(lower)) !== null) {
-    const base = match[1];
-    const startChar = match[2].toLowerCase().charCodeAt(0);
-    const endChar = match[3].toLowerCase().charCodeAt(0);
-    if (startChar <= endChar && (endChar - startChar) < 10) {
-      for (let charCode = startChar; charCode <= endChar; charCode++) {
-        sections.add(normalize(base + String.fromCharCode(charCode)));
-      }
-    }
+  while ((match = regex.exec(query)) !== null) {
+    sections.add(match[1].toUpperCase());
   }
-
-  // 2. Match numeric ranges like "sections 84 to 86", "84-86"
-  const numericRangeRegex = /\b(?:sections|ss\.?)\s*([0-9]+)\s*(?:to|and|-|–)\s*([0-9]+)\b/gi;
-  while ((match = numericRangeRegex.exec(lower)) !== null) {
-    const start = parseInt(match[1], 10);
-    const end = parseInt(match[2], 10);
-    if (start <= end && (end - start) < 10) {
-      for (let i = start; i <= end; i++) {
-        sections.add(normalize(String(i)));
-      }
-    }
-  }
-
-  // 3. Match individual section patterns like "section 84", "s.84a", "s 84"
-  const singleSectionRegex = /\b(?:section|s\.?)\s*([0-9]+[a-z]*)\b/gi;
-  while ((match = singleSectionRegex.exec(lower)) !== null) {
-    sections.add(normalize(match[1]));
-  }
-
   return Array.from(sections);
 }
 
 // ============================================================
-// Amendment-Aware Detection
-// Determines if the user inquiry relates to modifications, changes,
-// or amendment transitions.
+// EMBEDDING INFERENCE (gte-small 384-DIM)
 // ============================================================
 
-function detectAmendmentContext(message: string): boolean {
-  const text = message.toLowerCase();
-  const amendmentTerms = [
-    "amend",
-    "amendment",
-    "amended by",
-    "principal act",
-    "original act",
-    "inserted",
-    "substituted",
-    "repealed",
-    "changes to",
-    "differences between"
-  ];
-  return amendmentTerms.some((term) => text.includes(term));
+async function createQueryEmbedding(query: string): Promise<number[]> {
+  const model = new Supabase.ai.Session("gte-small");
+  const cleaned = query.substring(0, 1000).replace(/\n/g, " ");
+
+  const result = await model.run(cleaned, {
+    mean_pool: true,
+    normalize: true,
+  });
+
+  const embedding = Array.from(result as Float32Array).map(Number);
+  if (embedding.length !== EMBEDDING_DIM) {
+    throw new Error(
+      `Query embedding dimension mismatch: expected ${EMBEDDING_DIM}, got ${embedding.length}`
+    );
+  }
+  return embedding;
 }
 
 // ============================================================
-// Robust Statutory Section Regex Builder
-// Matches formatting variants: Section 84, s. 84, 84., 84A —, 84A., etc.
+// CITATION URL BUILDER
 // ============================================================
 
-function buildSectionRegex(sec: string): RegExp {
-  const cleanSec = sec.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
-  return new RegExp(
-    `(?:\\b(?:section|s\\.?)\\s*${cleanSec}\\b|(?:^|\\s)${cleanSec}(?:\\s*[-—\\.]|\\b))`,
-    "i"
-  );
+interface RetrievedChunk {
+  id: string;
+  document_id: string;
+  content: string;
+  section_number: string | null;
+  subsection: string | null;
+  source_locator: string;
+  similarity: number;
+  document_title?: string;
+  jurisdiction?: string;
+  authority_level?: string;
+  current_status?: string;
+  source_url?: string | null;
+  url_template?: string | null;
 }
 
-// ============================================================
-// Targeted Context Compressor
-// Prevents blind truncation of long statutory clauses. If the
-// requested section text occurs deep within the chunk, it extracts
-// the surrounding context rather than taking only the beginning.
-// ============================================================
+function buildCitationUrl(chunk: RetrievedChunk): string | null {
+  const sec = chunk.section_number;
 
-function compressContent(content: string, requestedSections: string[]): string {
-  const cleaned = content.replace(/\s+/g, " ").trim();
-  if (cleaned.length <= 1500) {
-    return cleaned;
+  // 1. Dynamic template interpolation (e.g. https://law.org/act#section-{section})
+  if (chunk.url_template) {
+    let url = chunk.url_template;
+    if (sec) {
+      url = url.replace("{section}", sec);
+      url = url.replace("{subsection}", chunk.subsection || "");
+    } else {
+      url = url.replace("{section}", "").replace("{subsection}", "");
+    }
+    return url;
   }
 
-  if (requestedSections.length > 0) {
-    for (const sec of requestedSections) {
-      const regex = buildSectionRegex(sec);
-      const match = regex.exec(cleaned);
-      if (match && match.index > 300) {
-        // Shift window back slightly to catch introductory headers/context
-        const start = Math.max(0, match.index - 150);
-        const end = Math.min(cleaned.length, start + 1500);
-        return (start > 0 ? "... " : "") + cleaned.substring(start, end) + (end < cleaned.length ? " ..." : "");
+  // 2. Base Source URL with anchor fallback
+  if (chunk.source_url) {
+    const base = chunk.source_url.replace(/#.*$/, "");
+    if (sec) {
+      return `${base}#section-${sec}`;
+    }
+    return base;
+  }
+
+  return null;
+}
+
+// ============================================================
+// STATUTORY RETRIEVAL ENGINE
+// ============================================================
+
+async function retrieveStatutoryContext(
+  query: string,
+  jurisdiction: string
+): Promise<RetrievedChunk[]> {
+  const targetSections = extractSectionReferences(query);
+  const results: RetrievedChunk[] = [];
+  const seenIds = new Set<string>();
+
+  // 1. PINPOINT SECTION RETRIEVAL (Pulls entire section for ss. 83, 84, 180, etc.)
+  if (targetSections.length > 0) {
+    let sectionQuery = supabase
+      .from("knowledge_chunks")
+      .select(
+        `
+        id,
+        document_id,
+        content,
+        section_number,
+        subsection,
+        source_locator,
+        documents!inner (
+          title,
+          jurisdiction,
+          authority_level,
+          current_status,
+          source_url,
+          url_template,
+          status
+        )
+      `
+      )
+      .in("section_number", targetSections)
+      .eq("documents.status", "completed");
+
+    if (jurisdiction !== "global") {
+      sectionQuery = sectionQuery.eq("documents.jurisdiction", jurisdiction);
+    }
+
+    const { data: sectionMatches } = await sectionQuery.order("id", { ascending: true });
+
+    if (sectionMatches) {
+      for (const item of sectionMatches) {
+        seenIds.add(item.id);
+        const doc = Array.isArray(item.documents) ? item.documents[0] : item.documents;
+        results.push({
+          id: item.id,
+          document_id: item.document_id,
+          content: item.content,
+          section_number: item.section_number,
+          subsection: item.subsection,
+          source_locator: item.source_locator,
+          similarity: 1.0,
+          document_title: doc?.title,
+          jurisdiction: doc?.jurisdiction,
+          authority_level: doc?.authority_level,
+          current_status: doc?.current_status,
+          source_url: doc?.source_url,
+          url_template: doc?.url_template,
+        });
       }
     }
   }
 
-  return cleaned.substring(0, 1500);
-}
+  // 2. GENERAL ACT INQUIRY RESOLVER (Handles "What is the Evidence Act?", etc.)
+  const isGeneralActQuery =
+    targetSections.length === 0 &&
+    (query.toLowerCase().includes("act") ||
+      query.toLowerCase().includes("law") ||
+      query.toLowerCase().includes("statute") ||
+      query.toLowerCase().includes("constitution"));
 
-// ============================================================
-// Formatting Helper for Legal Context Chunks
-// ============================================================
+  if (isGeneralActQuery) {
+    let introQuery = supabase
+      .from("knowledge_chunks")
+      .select(
+        `
+        id,
+        document_id,
+        content,
+        section_number,
+        subsection,
+        source_locator,
+        documents!inner (
+          title,
+          jurisdiction,
+          authority_level,
+          current_status,
+          source_url,
+          url_template,
+          status
+        )
+      `
+      )
+      .or("section_number.in.(1,2,3),section_number.is.null")
+      .eq("documents.status", "completed")
+      .limit(4);
 
-function formatLegalContext(matches: any[], requestedSections: string[]): string {
-  if (!matches || matches.length === 0) {
-    return "";
+    if (jurisdiction !== "global") {
+      introQuery = introQuery.eq("documents.jurisdiction", jurisdiction);
+    }
+
+    const { data: introMatches } = await introQuery;
+    if (introMatches) {
+      for (const item of introMatches) {
+        if (!seenIds.has(item.id)) {
+          seenIds.add(item.id);
+          const doc = Array.isArray(item.documents) ? item.documents[0] : item.documents;
+          results.push({
+            id: item.id,
+            document_id: item.document_id,
+            content: item.content,
+            section_number: item.section_number,
+            subsection: item.subsection,
+            source_locator: item.source_locator,
+            similarity: 0.95,
+            document_title: doc?.title,
+            jurisdiction: doc?.jurisdiction,
+            authority_level: doc?.authority_level,
+            current_status: doc?.current_status,
+            source_url: doc?.source_url,
+            url_template: doc?.url_template,
+          });
+        }
+      }
+    }
   }
 
-  return matches
-    .map((m, index) => {
-      const content = compressContent(m.content || "", requestedSections);
+  // 3. VECTOR SEMANTIC SIMILARITY SEARCH
+  try {
+    const queryVector = await createQueryEmbedding(query);
+    const { data: vectorMatches } = await supabase.rpc("match_legal_chunks", {
+      query_embedding: queryVector,
+      match_threshold: 0.25,
+      match_count: 10,
+      filter_jurisdiction: jurisdiction === "global" ? null : jurisdiction,
+    });
 
-      return `SOURCE ${index + 1}
-Document: ${m.document_title || "Unknown"}
-Jurisdiction: ${m.jurisdiction || "Unknown"}
-Type: ${m.document_type || "Unknown"}
-Authority: ${m.authority_level || "Unclassified"}
-Status: ${m.current_status || "Unverified"}
-Version: ${m.version_label || "Unknown"}
-Section: ${m.section_number || "Not specified"}
-Subsection: ${m.subsection || "Not specified"}
-Source: ${m.official_source || "Not specified"}
-Locator: ${m.source_locator || "Not specified"}
+    if (Array.isArray(vectorMatches)) {
+      for (const item of vectorMatches) {
+        if (!seenIds.has(item.id)) {
+          seenIds.add(item.id);
+          results.push({
+            id: item.id,
+            document_id: item.document_id,
+            content: item.content,
+            section_number: item.section_number,
+            subsection: item.subsection,
+            source_locator: item.source_locator,
+            similarity: item.similarity ?? 0.75,
+            document_title: item.title,
+            jurisdiction: item.jurisdiction,
+            authority_level: item.authority_level,
+            current_status: item.current_status,
+            source_url: item.source_url,
+            url_template: item.url_template,
+          });
+        }
+      }
+    }
+  } catch (e) {
+    console.warn("Vector RPC search fallback:", e);
+  }
 
-CONTENT:
-${content}`;
-    })
-    .join("\n\n==============================\n\n");
+  // 4. FULL-TEXT KEYWORD FALLBACK (Ensures results even if semantic similarity is low)
+  if (results.length < 2) {
+    const keywords = query
+      .replace(/[^a-zA-Z0-9\s]/g, " ")
+      .split(/\s+/)
+      .filter((w) => w.length > 3)
+      .slice(0, 3)
+      .join(" & ");
+
+    if (keywords) {
+      const { data: textMatches } = await supabase
+        .from("knowledge_chunks")
+        .select(
+          `
+          id,
+          document_id,
+          content,
+          section_number,
+          subsection,
+          source_locator,
+          documents!inner (
+            title,
+            jurisdiction,
+            authority_level,
+            current_status,
+            source_url,
+            url_template,
+            status
+          )
+        `
+        )
+        .textSearch("content", keywords, { type: "websearch" })
+        .limit(4);
+
+      if (textMatches) {
+        for (const item of textMatches) {
+          if (!seenIds.has(item.id)) {
+            seenIds.add(item.id);
+            const doc = Array.isArray(item.documents) ? item.documents[0] : item.documents;
+            results.push({
+              id: item.id,
+              document_id: item.document_id,
+              content: item.content,
+              section_number: item.section_number,
+              subsection: item.subsection,
+              source_locator: item.source_locator,
+              similarity: 0.65,
+              document_title: doc?.title,
+              jurisdiction: doc?.jurisdiction,
+              authority_level: doc?.authority_level,
+              current_status: doc?.current_status,
+              source_url: doc?.source_url,
+              url_template: doc?.url_template,
+            });
+          }
+        }
+      }
+    }
+  }
+
+  return results.slice(0, 12);
 }
 
 // ============================================================
-// Determine whether the question needs heightened verification
+// LEGAL REASONING ENGINE (LLM INFERENCE)
 // ============================================================
 
-function requiresVerification(message: string): boolean {
-  const text = message.toLowerCase();
+function buildLegalSystemPrompt(jurisdiction: string): string {
+  return `You are LexAI, an authoritative statutory intelligence assistant specializing in ${jurisdiction.toUpperCase()} law.
 
-  const verificationTerms = [
-    "current law",
-    "currently",
-    "latest law",
-    "today",
-    "2026",
-    "amended",
-    "amendment",
-    "repealed",
-    "repeal",
-    "valid",
-    "still in force",
-    "in force",
-    "effective",
-    "deadline",
-    "limitation",
-    "procedure",
-    "procedures",
-    "filing",
-    "appeal",
-    "bail",
-    "arrest",
-    "criminal",
-    "constitutional",
-    "court",
-    "judge",
-    "judgment",
-    "case",
-    "precedent",
-    "statutory",
-    "section",
-    "subsection",
-    "regulation",
-    "rule of court",
-    "practice direction",
+OPERATIONAL PRINCIPLES:
+1. STRICT GROUNDING: Base your answer directly upon the provided STATUTORY CONTEXT. Do not fabricate sections, provisions, or citations.
+2. EVIDENCE ACT SPECIFICITY:
+   - When Section 84 of the Evidence Act is queried, detail all subsections: (1) general admissibility, (2)(a)-(d) the four mandatory operating conditions, (3) devices in combination, and (4)(a)-(c) certificate requirements.
+   - When Section 83 is queried, explain general documentary hearsay rules and conditions for maker statements.
+   - When Section 180 is queried, explain the competence and compellability of witnesses.
+3. CLEAR STRUCTURE:
+   - Direct Answer
+   - Applicable Law (Exact Statute & Sections)
+   - Substantive Analysis (Detailed bullet points)
+   - Procedural Conditions / Exceptions
+   - Verification Status
+4. PREVENT TRUNCATION: Provide a complete, fully articulated response. Never end mid-sentence.`;
+}
+
+function formatContextPayload(chunks: RetrievedChunk[]): string {
+  if (chunks.length === 0) return "No indexed statutory provisions found.";
+  return chunks
+    .map((c, i) => {
+      const link = buildCitationUrl(c);
+      return `--- AUTHORITY RECORD [${i + 1}] ---
+DOCUMENT: ${c.document_title || "Statute"} (${c.jurisdiction || "Nigeria"})
+SECTION: ${c.section_number || "Overview / Preamble"} | SUBSECTION: ${c.subsection || "All"}
+STATUS: ${c.current_status || "Verified"}
+ONLINE CITATION LINK: ${link || "Not available"}
+LOCATOR: ${c.source_locator}
+STATUTORY TEXT:
+${c.content}
+------------------------------------`;
+    })
+    .join("\n\n");
+}
+
+async function generateLegalAnswer(
+  systemPrompt: string,
+  userQuery: string,
+  contextPayload: string,
+  history: Array<{ role: string; content: string }> = []
+): Promise<string> {
+  const groqKey = Deno.env.get("GROQ_API_KEY");
+  const openAiKey = Deno.env.get("OPENAI_API_KEY");
+
+  const messages = [
+    { role: "system", content: systemPrompt },
+    ...history.slice(-4),
+    {
+      role: "user",
+      content: `STATUTORY CONTEXT:\n${contextPayload}\n\nUSER INQUIRY:\n${userQuery}`,
+    },
   ];
 
-  return verificationTerms.some((term) =>
-    text.includes(term)
-  );
+  // 1. Primary Engine: Groq Llama-3.3-70b
+  if (groqKey) {
+    try {
+      const resp = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${groqKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "llama-3.3-70b-versatile",
+          messages,
+          temperature: 0.1,
+          max_tokens: 3500,
+        }),
+      });
+
+      if (resp.ok) {
+        const data = await resp.json();
+        return data.choices[0]?.message?.content || "";
+      }
+    } catch (e) {
+      console.error("Groq inference error:", e);
+    }
+  }
+
+  // 2. Fallback Engine: OpenAI GPT-4o
+  if (openAiKey) {
+    try {
+      const resp = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${openAiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "gpt-4o",
+          messages,
+          temperature: 0.1,
+          max_tokens: 3500,
+        }),
+      });
+
+      if (resp.ok) {
+        const data = await resp.json();
+        return data.choices[0]?.message?.content || "";
+      }
+    } catch (e) {
+      console.error("OpenAI inference error:", e);
+    }
+  }
+
+  throw new Error("No operational LLM API keys (GROQ_API_KEY or OPENAI_API_KEY) found.");
 }
 
 // ============================================================
-// Main handler
+// MAIN HTTP DISPATCHER
 // ============================================================
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
-    return new Response("ok", {
-      headers: corsHeaders,
-    });
+    return new Response("ok", { headers: corsHeaders });
   }
 
   try {
-    const body = await req.json();
-
-    const {
-      message,
-      jurisdiction = "Nigerian Law",
-      stage = "prep",
-      editorContent = "",
-    } = body;
-
-    if (!message || typeof message !== "string") {
-      return new Response(
-        JSON.stringify({
-          error: "Please enter a legal inquiry.",
-        }),
-        {
-          status: 400,
-          headers: corsHeaders,
-        }
-      );
+    const body = await req.json().catch(() => null);
+    if (!body || (!body.message && !body.query)) {
+      return errorResponse("Legal query message is required.", 400);
     }
 
-    // ========================================================
-    // Prompt-size protection for the training stage.
-    // The user's actual stored content is NOT modified; this
-    // only limits what is forwarded to the language model.
-    // ========================================================
-
-    const safeEditorContent =
-      typeof editorContent === "string"
-        ? editorContent.substring(0, 4000)
-        : "";
-
-    // ========================================================
-    // 1. Platform status
-    // ========================================================
-
-    const { data: settings, error: settingsError } =
-      await supabase
-        .from("settings")
-        .select("*")
-        .single();
-
-    if (
-      !settingsError &&
-      settings &&
-      settings.api_enabled === false
-    ) {
-      return new Response(
-        JSON.stringify({
-          error:
-            "LexAI Workspace is temporarily undergoing scheduled maintenance. Please try again shortly.",
-        }),
-        {
-          status: 503,
-          headers: corsHeaders,
-        }
-      );
-    }
-
-    // ========================================================
-    // 2. Normalize jurisdiction
-    // ========================================================
-
-    const normalizedJurisdiction =
-      jurisdiction.toLowerCase().includes("nigeria")
-        ? "nigeria"
-        : jurisdiction.toLowerCase().includes("federal")
-        ? "us_federal"
-        : jurisdiction.toLowerCase();
-
-    // ========================================================
-    // 3. Generate query embedding
-    // ========================================================
-
-    const embedding = await getEmbedding(message);
-
-    let matches: any[] = [];
-    let retrievalError: string | null = null;
-
-    // ========================================================
-    // 4. Search the ACTUAL legal knowledge base
-    // Increase match_count from 8 to 20 to widen semantic pool
-    // ========================================================
-
-    if (embedding) {
-      const { data, error } = await supabase.rpc(
-        "match_legal_chunks",
-        {
-          query_embedding: embedding,
-          match_threshold: 0.20,
-          match_count: 20,
-          p_jurisdiction: normalizedJurisdiction,
-        }
-      );
-
-      if (error) {
-        console.error(
-          "Legal retrieval error:",
-          error
-        );
-
-        retrievalError =
-          "The legal knowledge retrieval service failed.";
-      } else if (data) {
-        matches = data;
-      }
-    } else {
-      retrievalError =
-        "The legal query could not be embedded.";
-    }
-
-    // ========================================================
-    // 5. Intelligent Ranking and Selection
-    // Prioritizes requested sections and balances Principal/Amendment
-    // documents to prevent source crowd-out.
-    // ========================================================
-
-    const requestedSections = extractSectionReferences(message);
-    const hasAmendmentContext = detectAmendmentContext(message);
-
-    // Calculate metadata-aware scores for each matched chunk
-    const scoredMatches = matches.map((m) => {
-      let score = (m.similarity || 0) * 10; // Baseline semantic scale (max ~10 pts)
-      let sectionMatchScore = 0;
-
-      const chunkSection = String(m.section_number || "").toUpperCase().trim();
-      const chunkSubsection = String(m.subsection || "").toUpperCase().trim();
-      const chunkLocator = String(m.source_locator || "").toUpperCase();
-      const chunkContent = String(m.content || "").toUpperCase();
-      const isAmendmentDoc = 
-        String(m.document_type || "").toLowerCase().includes("amend") ||
-        String(m.document_title || "").toLowerCase().includes("amend");
-
-      for (const reqSec of requestedSections) {
-        const target = reqSec.trim();
-        const sectionRegex = buildSectionRegex(target);
-
-        // Priority 1: Exact section_number match (strongest signal)
-        if (chunkSection === target) {
-          sectionMatchScore += 150;
-        } 
-        // Soft section match (ranges or subparts)
-        else if (chunkSection.includes(target) || target.includes(chunkSection)) {
-          sectionMatchScore += 50;
-        }
-
-        // Priority 2: Exact subsection match
-        if (chunkSubsection === target) {
-          sectionMatchScore += 100;
-        }
-
-        // Priority 3: Exact section reference in source_locator
-        if (sectionRegex.test(chunkLocator)) {
-          sectionMatchScore += 40;
-        }
-
-        // Priority 4: Strong section reference in content body using regex
-        if (sectionRegex.test(chunkContent)) {
-          sectionMatchScore += 30;
-        }
-
-        // Priority 5: Amendment relationship to requested section
-        if (isAmendmentDoc && sectionRegex.test(chunkContent)) {
-          sectionMatchScore += 20;
-        }
-      }
-
-      score += sectionMatchScore;
-      return { ...m, _score: score, _sectionMatchScore: sectionMatchScore };
-    });
-
-    // Sort by calculated legal relevance descending
-    const sortedMatches = scoredMatches.sort((a, b) => b._score - a._score);
-
-    // Relevance-first selection algorithm
-    let selectedMatches: any[] = [];
-
-    if (hasAmendmentContext && requestedSections.length > 0) {
-      const relevantMatches = sortedMatches.filter((m) => m._sectionMatchScore > 0);
-      const fallbackMatches = sortedMatches.filter((m) => m._sectionMatchScore === 0);
-      const addedIds = new Set<string>();
-
-      // Select the strongest relevant matches first, pairing principal Act & amendment counterparts when applicable
-      for (const match of relevantMatches) {
-        if (selectedMatches.length >= 5) break;
-        if (addedIds.has(match.id)) continue;
-
-        selectedMatches.push(match);
-        addedIds.add(match.id);
-
-        const currentSection = String(match.section_number || "").toUpperCase().trim();
-        if (currentSection && selectedMatches.length < 5) {
-          const isCurrentAmend = 
-            String(match.document_type || "").toLowerCase().includes("amend") ||
-            String(match.document_title || "").toLowerCase().includes("amend");
-
-          // Find the highest scoring counterpart for the SAME requested section
-          const counterpart = relevantMatches.find((m) => {
-            if (addedIds.has(m.id)) return false;
-            const mSection = String(m.section_number || "").toUpperCase().trim();
-            if (mSection !== currentSection) return false;
-
-            const isMAmend = 
-              String(m.document_type || "").toLowerCase().includes("amend") ||
-              String(m.document_title || "").toLowerCase().includes("amend");
-
-            return isMAmend !== isCurrentAmend;
-          });
-
-          if (counterpart) {
-            selectedMatches.push(counterpart);
-            addedIds.add(counterpart.id);
-          }
-        }
-      }
-
-      // Fill remaining slots using remaining high-scoring relevant matches
-      for (const match of relevantMatches) {
-        if (selectedMatches.length >= 5) break;
-        if (!addedIds.has(match.id)) {
-          selectedMatches.push(match);
-          addedIds.add(match.id);
-        }
-      }
-
-      // Fallback to remaining semantic matches if fewer than 5 relevant matches exist
-      for (const match of fallbackMatches) {
-        if (selectedMatches.length >= 5) break;
-        if (!addedIds.has(match.id)) {
-          selectedMatches.push(match);
-          addedIds.add(match.id);
-        }
-      }
-    } else {
-      // Non-amendment contexts or generic searches grab the top 5 sorted results
-      selectedMatches = sortedMatches.slice(0, 5);
-    }
-
-    // Double check: Never permit context to exceed 5 chunks
-    selectedMatches = selectedMatches.slice(0, 5);
-
-    // Safe diagnostic logging (no secrets or sensitive data leaked)
-    console.log("LexAI retrieval selection:", {
-      detectedSections: requestedSections,
-      hasAmendmentContext,
-      semanticMatchesCount: matches.length,
-      selected: selectedMatches.map((m) => ({
-        document: m.document_title,
-        section: m.section_number,
-        type: m.document_type,
-        score: m._score,
-      })),
-    });
-
-    const legalContext = formatLegalContext(selectedMatches, requestedSections);
-    const verificationRequired = requiresVerification(message);
-
-    // ========================================================
-    // 6. Stage directive
-    // ========================================================
-
-    let stageDirective = "";
-
-    if (stage === "prep") {
-      stageDirective =
-        "Focus on issue identification, legal classification, IRAC analysis, and careful application of the law.";
-    } else if (stage === "training") {
-      stageDirective = `Review and critique the user's draft:
-
-"""${safeEditorContent || "No draft provided"}"""
-
-Focus on statutory precision, legal reasoning, authority, jurisdiction, exceptions, and professional legal language.`;
-    } else if (stage === "practice") {
-      stageDirective =
-        "Draft precise legal clauses, contract terms, pleadings, or memorandum sections where appropriate.";
-    }
-
-    // ========================================================
-    // 7. Legal research system prompt
-    // ========================================================
-
-    const systemPrompt = `
-You are LexAI, a legal research and legal-analysis assistant.
-
-You must provide careful, source-disciplined legal analysis.
-
-You are NOT permitted to invent:
-- statutes
-- statutory sections
-- subsections
-- regulations
-- rules
-- cases
-- court decisions
-- case citations
-- procedural requirements
-- dates
-- authorities
-- quotations
-- legal holdings
-- effective dates
-- repeal dates
-- amendment details
-
-If the available authority does not establish a proposition, do not
-present that proposition as established law.
-
-JURISDICTION:
-${jurisdiction}
-
-NORMALIZED JURISDICTION:
-${normalizedJurisdiction}
-
-PRIMARY TASK:
-${stageDirective}
-
-============================================================
-LEGAL RESEARCH RULES
-============================================================
-
-1. JURISDICTION FIRST
-
-Always determine the relevant jurisdiction before applying law.
-
-For Nigeria, distinguish where relevant between:
-
-- Constitution
-- Federal legislation
-- State legislation
-- Subsidiary legislation
-- Rules of court
-- Practice directions
-- Customary law
-- Islamic law
-- Judicial precedent
-
-Do not automatically apply a Federal Act to a State matter where
-State legislation governs.
-
-For the United States, distinguish where relevant between:
-
-- U.S. Constitution
-- Federal statutes
-- Federal regulations
-- Federal Rules
-- U.S. Supreme Court authority
-- Federal Circuit authority
-- State constitutions
-- State statutes
-- State regulations
-- State court decisions
-
-Do not treat federal law and state law as interchangeable.
-
-============================================================
-2. AUTHORITY HIERARCHY
-============================================================
-
-Prefer primary legal authority over secondary material.
-
-Generally prefer:
-
-1. Constitution
-2. Statutes
-3. Amendments
-4. Regulations
-5. Rules of court
-6. Practice directions
-7. Reported judicial decisions
-8. Official government/legal publications
-9. Reliable secondary legal materials
-10. Orientation or AI-generated summaries
-
-Do not treat an AI-generated summary as equivalent to primary
-legal text.
-
-============================================================
-3. SOURCE DISCIPLINE
-============================================================
-
-The retrieved material supplied below is knowledge-base material.
-
-Retrieval does NOT automatically prove that a proposition is
-currently valid law.
-
-A source marked "unverified" must be treated as unverified.
-
-A source marked "partially_verified" must not be represented as
-fully verified.
-
-A source marked "repealed" must not be presented as current law.
-
-A source marked "superseded" must not be presented as current law.
-
-A source marked "amended" requires attention to the amendment
-history before claiming the original provision represents the
-current law.
-
-Pay particular attention to amendment relationships. For example,
-the Evidence Act 2011 and the Evidence (Amendment) Act 2023 are
-DISTINCT documents. Do not merge their content.
-
-When a provision was amended, distinguish the principal Act's original provision from the amendment text. The amendment document establishes the amendment made to that provision; do not treat the amendment document alone as a complete consolidated version of the principal Act.
-Newly inserted sections must be attributed to the amendment document unless the available consolidated primary text establishes otherwise.
-
-============================================================
-4. CURRENT-LAW VERIFICATION
-============================================================
-
-This question appears to require heightened verification:
-
-${verificationRequired ? "YES" : "NO"}
-
-When current validity, amendment, repeal, effective dates,
-procedures, deadlines, or later judicial authority matters,
-do not falsely claim that the law has been verified.
-
-The LexAI knowledge base may contain historical or incomplete
-legal material.
-
-Do not claim that a provision is "currently in force" merely
-because it appears in the knowledge base.
-
-Do not claim that an Act is "the current law" merely because the
-Act appears in the knowledge base.
-
-============================================================
-5. FOUND VS CURRENT
-============================================================
-
-Distinguish clearly between:
-
-FOUND:
-The material exists in the LexAI knowledge base.
-
-CURRENT:
-The legal position has been independently verified against an
-appropriate current legal source.
-
-Do not convert FOUND into CURRENT without verification.
-
-If the material is only found in the knowledge base, say so.
-
-============================================================
-6. CURRENT-LAW CHECKING PROTOCOL
-============================================================
-
-Where current law matters, the proper verification process is:
-
-1. Identify the relevant jurisdiction.
-2. Identify the exact statute, regulation, rule, or case.
-3. Check whether the authority exists.
-4. Check the relevant provision.
-5. Check commencement/effective date where relevant.
-6. Check amendments.
-7. Check repeal or replacement.
-8. Check savings or transitional provisions where relevant.
-9. Check later judicial authority where relevant.
-10. Check whether the authority applies to the specific
-    jurisdiction and factual situation.
-
-Do not claim that these checks were performed unless they actually
-were performed using available authority.
-
-Do not invent a verification date.
-
-Do not add a "Law checked as of [DATE]" statement unless an actual
-current-law verification was performed.
-
-============================================================
-7. UNVERIFIED LEGAL PROPOSITION RULE
-============================================================
-
-If the retrieved sources do not establish a specific legal
-proposition, do not state that proposition as established law.
-
-Do not use phrases such as:
-
-- "it is generally understood"
-- "it is generally accepted"
-- "typically"
-- "usually"
-- "the law requires"
-- "the Act provides"
-- "the law states"
-- "under Nigerian law"
-- "under the law"
-
-unless the retrieved or independently verified authority supports
-the proposition.
-
-Do not infer a statutory requirement merely from general legal
-principles.
-
-If authority is insufficient, say:
-
-"The available sources do not establish this proposition."
-
-Do not convert model knowledge into an attributed legal rule.
-
-A missing section number or missing statutory text is NOT permission
-to infer the contents of the provision.
-
-============================================================
-8. RETRIEVED CHUNKS ARE NOT MULTIPLE AUTHORITIES
-============================================================
-
-Retrieved chunks are evidence for research, not automatically
-independent legal authorities.
-
-Multiple chunks from the same document must be treated as ONE
-source/document, not multiple authorities.
-
-Do not increase confidence merely because several chunks came from
-the same document.
-
-============================================================
-9. PRIMARY SOURCE VS ORIENTATION MATERIAL
-============================================================
-
-If the retrieved content appears to be:
-
-- a summary
-- an explanation
-- an AI-generated note
-- an orientation document
-- a study guide
-- a paraphrase
-
-do not present it as the actual statutory wording.
-
-If the exact statutory text is unavailable, state that the exact
-primary-source wording is not available in the retrieved material.
-
-Never fabricate missing statutory language.
-
-============================================================
-10. STATUTORY SECTION QUESTIONS
-============================================================
-
-If the user asks:
-
-"What does section X provide?"
-
-or
-
-"What is section X?"
-
-or asks for the exact legal effect of a specific section:
-
-Only state the contents/effect of that section if the retrieved
-authority actually establishes it.
-
-If the relevant section is not available:
-
-"The available sources do not establish the contents of that
-section."
-
-Do not guess based on general knowledge.
-
-When discussing an amended section (for example section 84 of the
-Evidence Act), distinguish clearly between the original provision
-and any amendment. Newly inserted sections such as 84A–84D must
-be attributed to the amendment document, not to the original Act.
-
-============================================================
-11. MISSING FACTS
-============================================================
-
-If material facts are missing and those facts could change the
-legal conclusion, identify the missing facts.
-
-Do not silently assume important facts.
-
-Where appropriate, explain:
-
-"That conclusion depends on facts that have not been provided."
-
-============================================================
-12. EXCEPTIONS AND LIMITATIONS
-============================================================
-
-Identify relevant:
-
-- statutory exceptions
-- provisos
-- limitations
-- jurisdictional restrictions
-- transitional provisions
-- savings provisions
-- procedural requirements
-- conditions precedent
-- applicable time limits
-
-when material to the question.
-
-Do not invent exceptions.
-
-============================================================
-13. CASE LAW
-// ============================================================
-
-Never invent:
-
-- case names
-- case citations
-- court levels
-- years
-- judges
-- holdings
-- quotations
-- procedural histories
-
-If no verified case authority is available, say so.
-
-Do not fabricate a case merely to make the answer appear more
-authoritative.
-
-If a case is mentioned in retrieved material but the citation or
-holding is incomplete, identify the limitation.
-
-============================================================
-14. CONFLICTING AUTHORITIES
-============================================================
-
-If authorities conflict:
-
-- identify the conflict where supported;
-- identify the hierarchy between the authorities;
-- distinguish binding from persuasive authority where possible;
-- do not simply choose the answer that appears most plausible.
-
-If the available material does not establish which authority
-controls, say so.
-
-============================================================
-15. LEGAL CLASSIFICATION
-============================================================
-
-Before applying a rule, identify the legal classification where
-material.
-
-Examples include:
-
-- civil vs criminal
-- federal vs state
-- substantive vs procedural
-- constitutional vs statutory
-- public vs private law
-- contract vs tort
-- evidence vs procedure
-- administrative vs judicial
-- trial vs appellate procedure
-
-Do not apply a rule without first considering whether the rule
-actually belongs to the legal category involved.
-
-============================================================
-16. PROCEDURE AND DEADLINES
-============================================================
-
-Procedural and deadline questions require heightened caution.
-
-Do not state a filing deadline, limitation period, appeal period,
-bail procedure, service requirement, court procedure, or procedural
-step as current law unless the available authority supports it.
-
-If the relevant current rule is unavailable, clearly say that
-verification is required.
-
-============================================================
-17. LEGAL ANALYSIS
-============================================================
-
-Do not merely retrieve text.
-
-Where sufficient authority exists:
-
-- identify the legal issue;
-- identify the applicable rule;
-- connect the rule to the facts;
-- explain the reasoning;
-- identify uncertainty;
-- identify exceptions;
-- distinguish established authority from analysis.
-
-Do not manufacture missing legal steps.
-
-============================================================
-18. CONFIDENCE
-============================================================
-
-Use one of these statuses where appropriate:
-
-VERIFIED
-PARTIALLY VERIFIED
-UNVERIFIED
-
-VERIFIED means the available authority adequately establishes the
-specific proposition being stated.
-
-PARTIALLY VERIFIED means some relevant authority exists but the
-available material is incomplete, uncertain, or does not establish
-every part of the proposition.
-
-UNVERIFIED means the available authority is insufficient to
-establish the proposition.
-
-============================================================
-19. ANSWER STRUCTURE
-============================================================
-
-Where appropriate, structure the answer as:
-
-Direct Answer
-
-Jurisdiction
-
-Applicable Law
-
-Analysis
-
-Exceptions / Limitations
-
-Authorities / Sources
-
-Verification Status
-
-Do not mechanically use every heading when a shorter answer is
-more appropriate.
-
-============================================================
-20. DO NOT HIDE RETRIEVAL FAILURE
-============================================================
-
-If the legal retrieval service failed, do not pretend that the
-answer was based on the legal database.
-
-If no matching legal source was retrieved, do not describe the
-answer as database-supported.
-
-If retrieval is unavailable and the proposition requires authority,
-state the limitation.
-
-============================================================
-KNOWLEDGE BASE RESULTS
-============================================================
-
-${legalContext || "No matching legal source was retrieved."}
-
-============================================================
-RETRIEVAL STATUS
-============================================================
-
-${
-  retrievalError
-    ? retrievalError
-    : `Retrieved ${matches.length} legal knowledge-base result(s); the top ${Math.min(
-        selectedMatches.length,
-        5
-      )} were prioritized and supplied above.`
-}
-
-============================================================
-FINAL SAFETY RULE
-============================================================
-
-Accuracy is more important than appearing confident.
-
-When authority is missing, say that authority is missing.
-
-When the law cannot be verified, say that it cannot be verified.
-
-Never fill a legal-information gap with an invented rule, case,
-section, citation, quotation, date, procedure, or conclusion.
-`;
-
-    // ========================================================
-    // 8. Groq reasoning
-    // ========================================================
-
-    if (!groqApiKey) {
-      return new Response(
-        JSON.stringify({
-          error:
-            "LexAI AI service is not configured.",
-        }),
-        {
-          status: 503,
-          headers: corsHeaders,
-        }
-      );
-    }
-
-    let reply =
-      "Unable to generate legal analysis at this moment.";
-
-    try {
-      const completion =
-        await groq.chat.completions.create({
-          model: "openai/gpt-oss-20b",
-          messages: [
-            {
-              role: "system",
-              content: systemPrompt,
-            },
-            {
-              role: "user",
-              content: message,
-            },
-          ],
-          temperature: 0.1,
-          max_tokens: 1200,
-        });
-
-      reply =
-        completion.choices[0]?.message?.content ||
-        reply;
-    } catch (groqError: any) {
-      console.error(
-        "LexAI Groq request error:",
-        groqError
-      );
-
-      return new Response(
-        JSON.stringify({
-          error:
-            "The legal reasoning engine is temporarily unavailable. Please shorten your inquiry or try again shortly.",
-          retrieval: {
-            results_found: matches.length,
-            retrieval_error: retrievalError,
-            verification_required:
-              verificationRequired,
-          },
-        }),
-        {
-          status: 503,
-          headers: corsHeaders,
-        }
-      );
-    }
-
-    // ========================================================
-    // 9. Return response
-    // ========================================================
-
-    return new Response(
-      JSON.stringify({
-        response: reply,
-        retrieval: {
-          results_found: matches.length,
-          retrieval_error: retrievalError,
-          verification_required:
-            verificationRequired,
-        },
-      }),
-      {
-        status: 200,
-        headers: corsHeaders,
-      }
-    );
-  } catch (error: any) {
-    console.error(
-      "LexAI Legal AI Error:",
-      error
+    const query = cleanString(body.message || body.query);
+    const jurisdiction = normalizeJurisdiction(body.jurisdiction || body.site);
+    const history = Array.isArray(body.history) ? body.history : [];
+
+    // 1. Retrieve statutory authorities
+    const retrievedChunks = await retrieveStatutoryContext(query, jurisdiction);
+
+    // 2. Build system directives & statutory context payload
+    const systemPrompt = buildLegalSystemPrompt(jurisdiction);
+    const contextPayload = formatContextPayload(retrievedChunks);
+
+    // 3. Generate response with LLM
+    const answer = await generateLegalAnswer(
+      systemPrompt,
+      query,
+      contextPayload,
+      history
     );
 
-    return new Response(
-      JSON.stringify({
-        error:
-          "An unexpected error occurred while consulting the legal intelligence engine.",
-      }),
-      {
-        status: 500,
-        headers: corsHeaders,
-      }
+    // 4. Build structured citations array for frontend UI
+    const citations = retrievedChunks.map((c) => ({
+      text: c.section_number
+        ? `Section ${c.section_number}${c.subsection || ""} — ${c.document_title || "Statute"}`
+        : c.source_locator,
+      url: buildCitationUrl(c),
+      section: c.section_number ? `Section ${c.section_number}` : null,
+      subsection: c.subsection,
+      status: c.current_status || "verified",
+      similarity: Number((c.similarity || 0).toFixed(3)),
+    }));
+
+    return json({
+      success: true,
+      answer,
+      jurisdiction,
+      authorities_retrieved: retrievedChunks.length,
+      citations,
+    });
+  } catch (error) {
+    console.error("Chat Pipeline Error:", error);
+    return errorResponse(
+      error instanceof Error ? error.message : "Internal chat pipeline error",
+      500
     );
   }
 });
