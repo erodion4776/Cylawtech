@@ -111,7 +111,7 @@ async function retrieveStatutoryContext(
       sectionQuery = sectionQuery.eq("documents.jurisdiction", jurisdiction);
     }
 
-    const { data: sectionMatches } = await sectionQuery.order("id", { ascending: true });
+    const { data: sectionMatches } = await sectionQuery.order("id", { ascending: true }).limit(6);
 
     if (sectionMatches) {
       for (const item of sectionMatches) {
@@ -136,64 +136,13 @@ async function retrieveStatutoryContext(
     }
   }
 
-  // 2. GENERAL OVERVIEW (Preamble, sections 1-3)
-  const isGeneralActQuery =
-    targetSections.length === 0 &&
-    (query.toLowerCase().includes("act") ||
-      query.toLowerCase().includes("law") ||
-      query.toLowerCase().includes("statute") ||
-      query.toLowerCase().includes("constitution"));
-
-  if (isGeneralActQuery) {
-    let introQuery = supabase
-      .from("knowledge_chunks")
-      .select(`
-        id, document_id, content, section_number, subsection, source_locator,
-        documents!inner (
-          title, jurisdiction, authority_level, current_status, source_url, url_template, status
-        )
-      `)
-      .or("section_number.in.(1,2,3),section_number.is.null")
-      .eq("documents.status", "completed")
-      .limit(4);
-
-    if (jurisdiction !== "global") {
-      introQuery = introQuery.eq("documents.jurisdiction", jurisdiction);
-    }
-
-    const { data: introMatches } = await introQuery;
-    if (introMatches) {
-      for (const item of introMatches) {
-        if (!seenIds.has(item.id)) {
-          seenIds.add(item.id);
-          const doc = Array.isArray(item.documents) ? item.documents[0] : item.documents;
-          results.push({
-            id: item.id,
-            document_id: item.document_id,
-            content: item.content,
-            section_number: item.section_number,
-            subsection: item.subsection,
-            source_locator: item.source_locator,
-            similarity: 0.95,
-            document_title: doc?.title,
-            jurisdiction: doc?.jurisdiction,
-            authority_level: doc?.authority_level,
-            current_status: doc?.current_status,
-            source_url: doc?.source_url,
-            url_template: doc?.url_template,
-          });
-        }
-      }
-    }
-  }
-
-  // 3. VECTOR SIMILARITY SEARCH
+  // 2. VECTOR SEARCH (Top matches)
   try {
     const queryVector = await createQueryEmbedding(query);
     const { data: vectorMatches } = await supabase.rpc("match_legal_chunks", {
       query_embedding: queryVector,
       match_threshold: 0.25,
-      match_count: 10,
+      match_count: 6,
       filter_jurisdiction: jurisdiction === "global" ? null : jurisdiction,
     });
 
@@ -220,19 +169,19 @@ async function retrieveStatutoryContext(
       }
     }
   } catch (e) {
-    console.warn("Vector search error:", e);
+    console.warn("Vector search fallback:", e);
   }
 
-  return results.slice(0, 12);
+  return results.slice(0, 6);
 }
 
 function buildLegalSystemPrompt(jurisdiction: string): string {
-  return `You are LexAI, an authoritative statutory intelligence assistant specializing in ${jurisdiction.toUpperCase()} law.
+  return `You are LexAI, an elite statutory intelligence assistant for ${jurisdiction.toUpperCase()} law.
 
 RULES:
-1. STRICT GROUNDING: Explain the law based on the STATUTORY CONTEXT provided below.
-2. CITATION DISCIPLINE: Always cite exact sections, subsections, and Act names.
-3. CLEAR SECTIONS: When Section 84 is queried, specify (1) admissibility, (2)(a)-(d) operating conditions, and (4) certificate requirements.`;
+1. STRICT GROUNDING: Explain the legal position based on the provided STATUTORY CONTEXT. Do not fabricate sections or rules.
+2. WHEN SECTION 84 IS QUERIED: Detail Subsection (1) admissibility, (2)(a)-(d) operating conditions, and (4) certificate requirements.
+3. CONCISE & COMPLETE: Present clear, authoritative legal analysis without trailing off.`;
 }
 
 function formatContextPayload(chunks: RetrievedChunk[]): string {
@@ -246,7 +195,7 @@ SECTION: ${c.section_number || "General"} | SUBSECTION: ${c.subsection || "All"}
 STATUS: ${c.current_status || "Verified"}
 ONLINE CITATION: ${link || "Not available"}
 TEXT:
-${c.content}
+${c.content.substring(0, 1000)}
 ------------------------------------`;
     })
     .join("\n\n");
@@ -258,7 +207,6 @@ async function generateLegalAnswer(
   contextPayload: string,
   history: Array<{ role: string; content: string }> = []
 ): Promise<string> {
-  // Sanitize key (strip quotes/spaces if pasted incorrectly)
   const rawGroqKey = Deno.env.get("GROQ_API_KEY") || "";
   const rawOpenAiKey = Deno.env.get("OPENAI_API_KEY") || "";
 
@@ -267,23 +215,23 @@ async function generateLegalAnswer(
 
   if (!groqKey && !openAiKey) {
     throw new Error(
-      "Missing API Key: GROQ_API_KEY is empty in Supabase Secrets. Please add GROQ_API_KEY in Project Settings -> Edge Functions -> Secrets."
+      "Missing GROQ_API_KEY. Please add GROQ_API_KEY in Supabase Project Settings -> Edge Functions -> Secrets."
     );
   }
 
   const messages = [
     { role: "system", content: systemPrompt },
-    ...history.slice(-4),
+    ...history.slice(-2),
     { role: "user", content: `STATUTORY CONTEXT:\n${contextPayload}\n\nUSER QUESTION:\n${userQuery}` },
   ];
 
-  // 1. Try Groq
+  let lastErrorText = "";
+
+  // 1. Try Groq (Llama-3.3-70b -> Llama-3.1-8b high quota)
   if (groqKey) {
     const modelsToTry = [
       "llama-3.3-70b-versatile",
-      "llama-3.1-70b-versatile",
-      "llama3-70b-8192",
-      "mixtral-8x7b-32768"
+      "llama-3.1-8b-instant"
     ];
 
     for (const model of modelsToTry) {
@@ -298,7 +246,7 @@ async function generateLegalAnswer(
             model,
             messages,
             temperature: 0.1,
-            max_tokens: 3000,
+            max_tokens: 1500, // Stays well within 6,000 TPM limit
           }),
         });
 
@@ -308,20 +256,16 @@ async function generateLegalAnswer(
         }
 
         const errText = await resp.text();
-        console.error(`Groq (${model}) returned status ${resp.status}:`, errText);
-
-        // If it's a 401 Unauthorized, key is invalid
-        if (resp.status === 401) {
-          throw new Error(`Groq API Key Rejected (401 Unauthorized): Please check your GROQ_API_KEY at console.groq.com.`);
-        }
-      } catch (e: any) {
-        if (e.message?.includes("401")) throw e;
-        console.warn(`Model ${model} failed, trying next...`, e);
+        lastErrorText = `Groq (${model}) HTTP ${resp.status}: ${errText}`;
+        console.error(lastErrorText);
+      } catch (err: any) {
+        lastErrorText = `Groq fetch error: ${err.message}`;
+        console.warn(`Model ${model} failed, attempting fallback...`);
       }
     }
   }
 
-  // 2. Try OpenAI Fallback
+  // 2. Fallback to OpenAI if configured
   if (openAiKey) {
     try {
       const resp = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -331,10 +275,10 @@ async function generateLegalAnswer(
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "gpt-4o",
+          model: "gpt-4o-mini",
           messages,
           temperature: 0.1,
-          max_tokens: 3000,
+          max_tokens: 1500,
         }),
       });
 
@@ -344,13 +288,13 @@ async function generateLegalAnswer(
       }
 
       const errText = await resp.text();
-      throw new Error(`OpenAI error (${resp.status}): ${errText}`);
+      lastErrorText = `OpenAI HTTP ${resp.status}: ${errText}`;
     } catch (e: any) {
-      throw new Error(`OpenAI failed: ${e.message}`);
+      lastErrorText = `OpenAI error: ${e.message}`;
     }
   }
 
-  throw new Error("Could not get a successful response from Groq. Check Supabase Edge Function logs for details.");
+  throw new Error(`LLM Generation Failed. Details: ${lastErrorText}`);
 }
 
 // ============================================================
