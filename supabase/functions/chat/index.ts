@@ -176,7 +176,7 @@ async function retrieveStatutoryContext(
 }
 
 function buildLegalSystemPrompt(jurisdiction: string): string {
-  return `You are LexAI, an authoritative statutory intelligence assistant for ${jurisdiction.toUpperCase()} law.
+  return `You are LexAI, an elite statutory intelligence assistant for ${jurisdiction.toUpperCase()} law.
 
 RULES:
 1. STRICT GROUNDING: Explain the legal position based on the provided STATUTORY CONTEXT. Do not fabricate sections or rules.
@@ -217,18 +217,20 @@ async function generateLegalAnswer(
     throw new Error("Missing GROQ_API_KEY in Supabase Edge Functions secrets.");
   }
 
-  // CRITICAL FIX: Sanitize history so only pure role & content strings are sent to Groq
-  const sanitizedHistory = history
+  // Sanitize history so only pure role & content strings are forwarded
+  const sanitizedHistory = (history || [])
     .filter(
       (m: any) =>
         m &&
+        typeof m === "object" &&
         typeof m.content === "string" &&
+        m.content.trim().length > 0 &&
         (m.role === "user" || m.role === "assistant")
     )
     .slice(-3)
     .map((m: any) => ({
       role: m.role as "user" | "assistant",
-      content: String(m.content),
+      content: String(m.content).trim(),
     }));
 
   const messages = [
@@ -240,13 +242,14 @@ async function generateLegalAnswer(
     },
   ];
 
-  let lastErrorText = "";
+  const errors: string[] = [];
 
-  // 1. Try Groq (Llama-3.3-70b -> Llama-3.1-8b)
+  // 1. Try Groq Active Production Models
   if (groqKey) {
     const modelsToTry = [
       "llama-3.3-70b-versatile",
-      "llama-3.1-8b-instant"
+      "mixtral-8x7b-32768",
+      "gemma2-9b-it"
     ];
 
     for (const model of modelsToTry) {
@@ -267,19 +270,23 @@ async function generateLegalAnswer(
 
         if (resp.ok) {
           const data = await resp.json();
-          return data.choices[0]?.message?.content || "";
+          const reply = data.choices?.[0]?.message?.content;
+          if (reply) return reply;
         }
 
         const errText = await resp.text();
-        lastErrorText = `Groq (${model}) HTTP ${resp.status}: ${errText}`;
-        console.error(lastErrorText);
+        const errDesc = `[Groq ${model} (${resp.status})]: ${errText}`;
+        console.error(errDesc);
+        errors.push(errDesc);
       } catch (err: any) {
-        lastErrorText = `Groq fetch error: ${err.message}`;
+        const errDesc = `[Groq ${model} error]: ${err.message}`;
+        console.error(errDesc);
+        errors.push(errDesc);
       }
     }
   }
 
-  // 2. Fallback to OpenAI
+  // 2. Try OpenAI Fallback
   if (openAiKey) {
     try {
       const resp = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -298,17 +305,18 @@ async function generateLegalAnswer(
 
       if (resp.ok) {
         const data = await resp.json();
-        return data.choices[0]?.message?.content || "";
+        const reply = data.choices?.[0]?.message?.content;
+        if (reply) return reply;
       }
 
       const errText = await resp.text();
-      lastErrorText = `OpenAI HTTP ${resp.status}: ${errText}`;
+      errors.push(`[OpenAI (${resp.status})]: ${errText}`);
     } catch (e: any) {
-      lastErrorText = `OpenAI error: ${e.message}`;
+      errors.push(`[OpenAI error]: ${e.message}`);
     }
   }
 
-  throw new Error(`LLM Generation Failed. Details: ${lastErrorText}`);
+  throw new Error(`LLM Generation Failed across all models:\n${errors.join("\n")}`);
 }
 
 // ============================================================
