@@ -244,10 +244,13 @@ async function generateLegalAnswer(
 
   const errors: string[] = [];
 
-  // 1. Try Groq Active Production Models
+  // 1. Groq Model Roster (with recommended replacement model IDs)
   if (groqKey) {
     const modelsToTry = [
+      "openai/gpt-oss-120b",
       "llama-3.3-70b-versatile",
+      "openai/gpt-oss-20b",
+      "qwen/qwen3.6-27b",
       "mixtral-8x7b-32768",
       "gemma2-9b-it"
     ];
@@ -286,7 +289,7 @@ async function generateLegalAnswer(
     }
   }
 
-  // 2. Try OpenAI Fallback
+  // 2. OpenAI Fallback
   if (openAiKey) {
     try {
       const resp = await fetch("https://api.openai.com/v1/chat/completions", {
