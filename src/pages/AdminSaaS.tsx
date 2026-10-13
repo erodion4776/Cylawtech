@@ -117,21 +117,18 @@ interface ApiEnvelope<T = any> {
 }
 
 interface PreviewData {
-  document: Document & { full_content: string };
-  analysis: {
-    characters: number;
-    pages_detected: number;
-    sections_detected: number;
-    sections: string[];
-    planned_chunks: number;
-    chunk_previews: Array<{
-      index: number;
-      section_number: string | null;
-      subsection: string | null;
-      source_locator: string;
-      content: string;
-    }>;
-  };
+  metadata: Document;
+  full_content: string;
+  sections_count: number;
+  sections: string[];
+  planned_chunks: number;
+  indexed_chunks: Array<{
+    id: string;
+    content: string;
+    section_number: string | null;
+    subsection: string | null;
+    source_locator: string;
+  }>;
 }
 
 type AdminTab = 'home' | 'settings' | 'keys' | 'docs' | 'users' | 'qa';
@@ -140,7 +137,7 @@ type IngestMode = 'text' | 'url' | 'file';
 const BATCH_SIZE = 10;
 
 // ============================================================
-// COMPONENT
+// MAIN COMPONENT
 // ============================================================
 
 export default function AdminSaaS() {
@@ -150,9 +147,10 @@ export default function AdminSaaS() {
     localStorage.getItem('lex_admin_key') || ''
   );
   const [isAuth, setIsAuth] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<AdminTab>('home');
 
-  // Core Data State
+  // Core Data
   const [settings, setSettings] = useState<SystemConfiguration | null>(null);
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
   const [docs, setDocs] = useState<Document[]>([]);
@@ -165,7 +163,7 @@ export default function AdminSaaS() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [userActionLoading, setUserActionLoading] = useState<string | null>(null);
 
-  // Ingestion Form State
+  // Ingestion Form
   const [ingestPanelOpen, setIngestPanelOpen] = useState(false);
   const [ingestMode, setIngestMode] = useState<IngestMode>('text');
   const [docTitle, setDocTitle] = useState('');
@@ -186,13 +184,12 @@ export default function AdminSaaS() {
   const [uploadSuccess, setUploadSuccess] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
-  // Preview State
+  // Preview & Indexing
   const [previewOpen, setPreviewOpen] = useState(false);
   const [preview, setPreview] = useState<PreviewData | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [selectedDocument, setSelectedDocument] = useState<Document | null>(null);
 
-  // Indexing State
   const [isIndexing, setIsIndexing] = useState(false);
   const [indexingDocumentId, setIndexingDocumentId] = useState<number | string | null>(null);
   const [indexingMessage, setIndexingMessage] = useState<string | null>(null);
@@ -204,7 +201,7 @@ export default function AdminSaaS() {
   const adminHeaders = useCallback(
     (isJson = false): HeadersInit => ({
       ...(isJson ? { 'Content-Type': 'application/json' } : {}),
-      'x-admin-key': adminKey,
+      'x-admin-key': adminKey.trim(),
     }),
     [adminKey]
   );
@@ -217,15 +214,24 @@ export default function AdminSaaS() {
     } catch {
       parsed = { success: false, error: text || `HTTP ${response.status}` };
     }
+
     if (!response.ok) {
       return {
         success: false,
         data: null as T,
-        error: parsed?.error || parsed?.message || `HTTP ${response.status}`,
+        error: parsed?.error || parsed?.message || `Request failed with HTTP ${response.status}`,
         details: parsed?.details,
       };
     }
-    return parsed;
+
+    if (parsed && typeof parsed === 'object' && 'data' in parsed) {
+      return parsed as ApiEnvelope<T>;
+    }
+
+    return {
+      success: true,
+      data: parsed as T,
+    };
   };
 
   // ============================================================
@@ -249,29 +255,34 @@ export default function AdminSaaS() {
   const validateAndFetch = async () => {
     if (!adminKey.trim()) {
       setIsAuth(false);
+      setAuthError('Please enter your administrator key.');
       return;
     }
     setLoading(true);
+    setAuthError(null);
     try {
       const res = await fetch('/api/admin/settings', { headers: adminHeaders() });
       const result = await parseResponse<SystemConfiguration>(res);
-      if (res.ok && result.success) {
+
+      if (res.ok && (result.success || result.data)) {
         setSettings(result.data);
         setIsAuth(true);
-        localStorage.setItem('lex_admin_key', adminKey);
+        localStorage.setItem('lex_admin_key', adminKey.trim());
         await fetchData();
       } else {
         setIsAuth(false);
+        setAuthError(result.error || `Authentication failed (HTTP ${res.status}).`);
       }
-    } catch {
+    } catch (err: any) {
       setIsAuth(false);
+      setAuthError(err.message || 'Unable to connect to Admin service. Check your network.');
     } finally {
       setLoading(false);
     }
   };
 
   const fetchData = async () => {
-    if (!adminKey) return;
+    if (!adminKey.trim()) return;
     try {
       const [settingsRes, keysRes, docsRes, usersRes, qaRes] = await Promise.all([
         fetch('/api/admin/settings', { headers: adminHeaders() }),
@@ -283,26 +294,26 @@ export default function AdminSaaS() {
 
       if (settingsRes.ok) {
         const r = await parseResponse<SystemConfiguration>(settingsRes);
-        if (r.success) setSettings(r.data);
+        if (r.data) setSettings(r.data);
       }
       if (keysRes.ok) {
         const r = await parseResponse<ApiKey[]>(keysRes);
-        if (r.success) setApiKeys(r.data || []);
+        if (r.data) setApiKeys(r.data || []);
       }
       if (docsRes.ok) {
         const r = await parseResponse<Document[]>(docsRes);
-        if (r.success) setDocs(r.data || []);
+        if (r.data) setDocs(r.data || []);
       }
       if (usersRes.ok) {
         const r = await parseResponse<UserRecord[]>(usersRes);
-        if (r.success) setUsers(r.data || []);
+        if (r.data) setUsers(r.data || []);
       }
       if (qaRes.ok) {
         const r = await parseResponse<QALog[]>(qaRes);
-        if (r.success) setQaLogs(r.data || []);
+        if (r.data) setQaLogs(r.data || []);
       }
     } catch (error) {
-      console.error('Admin data fetch failed:', error);
+      console.error('Admin data fetch error:', error);
     }
   };
 
@@ -319,7 +330,7 @@ export default function AdminSaaS() {
         body: JSON.stringify({ api_enabled: !settings.api_enabled }),
       });
       const result = await parseResponse<SystemConfiguration>(res);
-      if (res.ok && result.success) setSettings(result.data);
+      if (res.ok && result.data) setSettings(result.data);
       else alert(result.error || 'Unable to update system status.');
     } catch {
       alert('Unable to update system status.');
@@ -336,7 +347,7 @@ export default function AdminSaaS() {
         body: JSON.stringify({ site: firmName.trim() }),
       });
       const result = await parseResponse<ApiKey>(res);
-      if (res.ok && result.success) {
+      if (res.ok && result.data) {
         await fetchData();
         if (result.data?.key) alert(`Client license created.\n\nAccess key:\n${result.data.key}`);
       } else {
@@ -352,7 +363,7 @@ export default function AdminSaaS() {
     try {
       const res = await fetch(`/api/admin/keys/${id}`, { method: 'DELETE', headers: adminHeaders() });
       const result = await parseResponse(res);
-      if (res.ok && result.success) await fetchData();
+      if (res.ok) await fetchData();
       else alert(result.error || 'Unable to revoke license.');
     } catch {
       alert('Unable to revoke license.');
@@ -384,7 +395,7 @@ export default function AdminSaaS() {
         }),
       });
       const result = await parseResponse(res);
-      if (res.ok && result.success) await fetchData();
+      if (res.ok) await fetchData();
       else alert(result.error || 'Failed to upgrade user.');
     } catch {
       alert('Failed to upgrade user.');
@@ -403,7 +414,7 @@ export default function AdminSaaS() {
         body: JSON.stringify({ is_subscribed: false, subscription_tier: 'free' }),
       });
       const result = await parseResponse(res);
-      if (res.ok && result.success) await fetchData();
+      if (res.ok) await fetchData();
       else alert(result.error || 'Failed to downgrade user.');
     } catch {
       alert('Failed to downgrade user.');
@@ -424,7 +435,7 @@ export default function AdminSaaS() {
           body: JSON.stringify({ is_banned: true, ban_reason: reason.trim() }),
         });
         const result = await parseResponse(res);
-        if (res.ok && result.success) await fetchData();
+        if (res.ok) await fetchData();
         else alert(result.error || 'Failed to ban user.');
       } catch {
         alert('Failed to ban user.');
@@ -440,7 +451,7 @@ export default function AdminSaaS() {
           body: JSON.stringify({ is_banned: false }),
         });
         const result = await parseResponse(res);
-        if (res.ok && result.success) await fetchData();
+        if (res.ok) await fetchData();
         else alert(result.error || 'Failed to unban user.');
       } catch {
         alert('Failed to unban user.');
@@ -461,7 +472,7 @@ export default function AdminSaaS() {
         body: JSON.stringify({ trial_limit: Number(amount), trial_messages_used: 0 }),
       });
       const result = await parseResponse(res);
-      if (res.ok && result.success) await fetchData();
+      if (res.ok) await fetchData();
       else alert(result.error || 'Failed to update token quota.');
     } catch {
       alert('Failed to update token quota.');
@@ -566,7 +577,7 @@ export default function AdminSaaS() {
     if (verificationSource.trim()) formData.append('verification_source', verificationSource.trim());
     const res = await fetch('/api/admin/documents/upload', {
       method: 'POST',
-      headers: { 'x-admin-key': adminKey },
+      headers: { 'x-admin-key': adminKey.trim() },
       body: formData,
     });
     const result = await parseResponse<any>(res);
@@ -609,9 +620,9 @@ export default function AdminSaaS() {
     try {
       const res = await fetch(`/api/admin/documents/${id}/preview`, { headers: adminHeaders() });
       const result = await parseResponse<PreviewData>(res);
-      if (res.ok && result.success) {
+      if (res.ok && result.data) {
         setPreview(result.data);
-        setSelectedDocument(result.data.document);
+        setSelectedDocument(result.data.metadata);
       } else {
         throw new Error(result.error || 'Unable to load preview.');
       }
@@ -666,7 +677,7 @@ export default function AdminSaaS() {
     try {
       const res = await fetch(`/api/admin/documents/${id}`, { method: 'DELETE', headers: adminHeaders() });
       const result = await parseResponse(res);
-      if (res.ok && result.success) await fetchData();
+      if (res.ok) await fetchData();
       else alert(result.error || 'Failed to remove document.');
     } catch {
       alert('Failed to remove document.');
@@ -674,7 +685,7 @@ export default function AdminSaaS() {
   };
 
   // ============================================================
-  // AUTH GUARD VIEW
+  // AUTH SCREEN
   // ============================================================
 
   if (!isAuth) {
@@ -685,19 +696,28 @@ export default function AdminSaaS() {
             <Shield size={24} />
           </div>
           <h2 className="text-xl font-bold text-white mb-1">Practice Control Portal</h2>
-          <p className="text-slate-400 text-xs mb-6 leading-relaxed">Enter master authorization key to continue</p>
+          <p className="text-slate-400 text-xs mb-4 leading-relaxed">Enter master authorization key to continue</p>
+
           <input
             type="password"
             value={adminKey}
-            onChange={(e) => setAdminKey(e.target.value)}
+            onChange={(e) => { setAdminKey(e.target.value); setAuthError(null); }}
             onKeyDown={(e) => { if (e.key === 'Enter') validateAndFetch(); }}
             placeholder="••••••••••••••••"
-            className="w-full bg-slate-800 border border-slate-700 rounded-xl py-3.5 px-4 text-white mb-4 text-center focus:ring-2 focus:ring-blue-500 outline-none transition-all font-mono"
+            className="w-full bg-slate-800 border border-slate-700 rounded-xl py-3.5 px-4 text-white mb-3 text-center focus:ring-2 focus:ring-blue-500 outline-none transition-all font-mono"
           />
+
+          {authError && (
+            <div className="mb-4 p-2.5 bg-rose-500/10 border border-rose-500/25 rounded-xl text-rose-400 text-xs flex items-center gap-2 text-left">
+              <AlertCircle size={14} className="shrink-0" />
+              <span>{authError}</span>
+            </div>
+          )}
+
           <button
             onClick={validateAndFetch}
             disabled={loading}
-            className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold py-3.5 rounded-xl text-sm transition-all"
+            className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold py-3.5 rounded-xl text-sm transition-all cursor-pointer"
           >
             {loading ? 'Authenticating...' : 'Access Workspace'}
           </button>
@@ -1299,7 +1319,7 @@ export default function AdminSaaS() {
               <div className="p-5 border-b border-slate-800 flex items-center justify-between gap-4 shrink-0">
                 <div className="min-w-0">
                   <p className="text-[10px] uppercase font-bold tracking-wider text-blue-400">Legal Source Preview</p>
-                  <h3 className="text-base sm:text-xl font-black text-white truncate mt-1">{preview?.document?.title || selectedDocument?.title || 'Document Preview'}</h3>
+                  <h3 className="text-base sm:text-xl font-black text-white truncate mt-1">{preview?.metadata?.title || selectedDocument?.title || 'Document Preview'}</h3>
                 </div>
                 <button onClick={() => setPreviewOpen(false)} className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border-0 cursor-pointer"><X size={18} /></button>
               </div>
@@ -1313,10 +1333,10 @@ export default function AdminSaaS() {
                   <div className="flex-1 overflow-y-auto p-5 space-y-5">
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                       {[
-                        { label: 'Jurisdiction', value: preview.document.jurisdiction },
-                        { label: 'Type', value: preview.document.document_type },
-                        { label: 'Authority', value: preview.document.authority_level || 'primary' },
-                        { label: 'Planned Chunks', value: preview.analysis.planned_chunks },
+                        { label: 'Jurisdiction', value: preview.metadata.jurisdiction },
+                        { label: 'Type', value: preview.metadata.document_type },
+                        { label: 'Authority', value: preview.metadata.authority_level || 'primary' },
+                        { label: 'Planned Chunks', value: preview.planned_chunks },
                       ].map((stat) => (
                         <div key={stat.label} className="bg-slate-950 border border-slate-800 rounded-xl p-3">
                           <p className="text-[9px] uppercase text-slate-600 font-bold">{stat.label}</p>
@@ -1336,16 +1356,16 @@ export default function AdminSaaS() {
                     </div>
 
                     <div className="flex flex-wrap gap-2">
-                      <span className="text-[10px] bg-slate-950 border border-slate-800 px-3 py-1.5 rounded-full text-slate-400">{preview.analysis.characters.toLocaleString()} characters</span>
-                      <span className="text-[10px] bg-slate-950 border border-slate-800 px-3 py-1.5 rounded-full text-slate-400">{preview.analysis.sections_detected} sections detected</span>
+                      <span className="text-[10px] bg-slate-950 border border-slate-800 px-3 py-1.5 rounded-full text-slate-400">{preview.full_content.length.toLocaleString()} characters</span>
+                      <span className="text-[10px] bg-slate-950 border border-slate-800 px-3 py-1.5 rounded-full text-slate-400">{preview.sections_count} sections detected</span>
                     </div>
 
-                    {preview.analysis.sections.length > 0 && (
+                    {preview.sections.length > 0 && (
                       <div>
                         <p className="text-[10px] uppercase tracking-wider font-bold text-slate-500 mb-2">Detected Sections</p>
                         <div className="flex flex-wrap gap-1.5">
-                          {preview.analysis.sections.slice(0, 100).map((section) => (
-                            <span key={section} className="text-[10px] px-2 py-1 bg-blue-500/10 text-blue-400 border border-blue-500/15 rounded-lg">s.{section}</span>
+                          {preview.sections.slice(0, 100).map((section) => (
+                            <span key={section} className="text-[10px] px-2 py-1 bg-blue-500/10 text-blue-400 border border-blue-500/15 rounded-lg">{section}</span>
                           ))}
                         </div>
                       </div>
@@ -1354,18 +1374,18 @@ export default function AdminSaaS() {
                     <div>
                       <p className="text-[10px] uppercase tracking-wider font-bold text-slate-500 mb-2">Extracted Content</p>
                       <div className="bg-slate-950 border border-slate-800 rounded-2xl p-4 max-h-72 overflow-y-auto">
-                        <pre className="whitespace-pre-wrap font-mono text-[10px] text-slate-400 leading-relaxed">{preview.document.full_content}</pre>
+                        <pre className="whitespace-pre-wrap font-mono text-[10px] text-slate-400 leading-relaxed">{preview.full_content}</pre>
                       </div>
                     </div>
 
                     <div>
                       <p className="text-[10px] uppercase tracking-wider font-bold text-slate-500 mb-2">Chunking Preview</p>
                       <div className="space-y-2">
-                        {preview.analysis.chunk_previews.map((chunk) => (
-                          <div key={chunk.index} className="bg-slate-950 border border-slate-800 rounded-xl p-3">
+                        {preview.indexed_chunks.map((chunk, i) => (
+                          <div key={chunk.id || i} className="bg-slate-950 border border-slate-800 rounded-xl p-3">
                             <div className="flex items-center justify-between gap-3 mb-2">
                               <span className="text-[9px] font-bold text-blue-400">{chunk.source_locator}</span>
-                              <span className="text-[9px] text-slate-600">#{chunk.index + 1}</span>
+                              <span className="text-[9px] text-slate-600">#{i + 1}</span>
                             </div>
                             <p className="text-[10px] text-slate-500 leading-relaxed">{chunk.content}</p>
                           </div>
@@ -1376,11 +1396,11 @@ export default function AdminSaaS() {
 
                   <div className="p-4 border-t border-slate-800 bg-slate-900 flex flex-col sm:flex-row gap-2 shrink-0">
                     <button onClick={() => setPreviewOpen(false)} className="flex-1 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold border-0 cursor-pointer">Close Preview</button>
-                    {preview.document.status !== 'completed' && preview.document.status !== 'rejected' && (
-                      <button onClick={() => { setPreviewOpen(false); indexDocument(preview.document); }} disabled={isIndexing} className="flex-1 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold border-0 flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"><Play size={14} />Approve & Index</button>
+                    {preview.metadata.status !== 'completed' && preview.metadata.status !== 'rejected' && (
+                      <button onClick={() => { setPreviewOpen(false); indexDocument(preview.metadata); }} disabled={isIndexing} className="flex-1 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold border-0 flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"><Play size={14} />Approve & Index</button>
                     )}
-                    {preview.document.status === 'completed' && (
-                      <button onClick={() => { setPreviewOpen(false); indexDocument(preview.document, true); }} disabled={isIndexing} className="flex-1 py-3 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold border-0 flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"><RefreshCw size={14} />Reindex</button>
+                    {preview.metadata.status === 'completed' && (
+                      <button onClick={() => { setPreviewOpen(false); indexDocument(preview.metadata, true); }} disabled={isIndexing} className="flex-1 py-3 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold border-0 flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"><RefreshCw size={14} />Reindex</button>
                     )}
                   </div>
                 </>
