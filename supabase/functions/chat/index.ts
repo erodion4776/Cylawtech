@@ -176,12 +176,16 @@ async function retrieveStatutoryContext(
 }
 
 function buildLegalSystemPrompt(jurisdiction: string): string {
-  return `You are LexAI, an elite statutory intelligence assistant for ${jurisdiction.toUpperCase()} law.
+  return `You are LexAI, an authoritative statutory intelligence assistant for ${jurisdiction.toUpperCase()} law.
 
-RULES:
-1. STRICT GROUNDING: Explain the legal position based on the provided STATUTORY CONTEXT. Do not fabricate sections or rules.
-2. WHEN SECTION 84 IS QUERIED: Detail Subsection (1) admissibility, (2)(a)-(d) operating conditions, and (4) certificate requirements.
-3. CONCISE & COMPLETE: Present clear, authoritative legal analysis.`;
+OPERATIONAL PRINCIPLES:
+1. STRICT GROUNDING: Explain the legal position based strictly upon the STATUTORY CONTEXT provided below. Do not fabricate sections or rules.
+2. EVIDENCE ACT SPECIFICITY:
+   - When Section 84 is queried: Detail Subsection (1) admissibility, (2)(a)-(d) operating conditions, and (4) certificate requirements.
+   - When witness competence is queried: Detail Section 175 (general competence) and Section 180 (spousal/witness competence).
+3. FORMATTING & COMPLETENESS:
+   - Use structured bullet points rather than wide markdown tables to ensure efficient formatting.
+   - Always conclude your answer with a complete final paragraph or conclusion. Never end mid-sentence or mid-table.`;
 }
 
 function formatContextPayload(chunks: RetrievedChunk[]): string {
@@ -217,7 +221,7 @@ async function generateLegalAnswer(
     throw new Error("Missing GROQ_API_KEY in Supabase Edge Functions secrets.");
   }
 
-  // Sanitize history so only pure role & content strings are forwarded
+  // Sanitize history
   const sanitizedHistory = (history || [])
     .filter(
       (m: any) =>
@@ -227,7 +231,7 @@ async function generateLegalAnswer(
         m.content.trim().length > 0 &&
         (m.role === "user" || m.role === "assistant")
     )
-    .slice(-3)
+    .slice(-2)
     .map((m: any) => ({
       role: m.role as "user" | "assistant",
       content: String(m.content).trim(),
@@ -244,15 +248,13 @@ async function generateLegalAnswer(
 
   const errors: string[] = [];
 
-  // 1. Groq Model Roster (with recommended replacement model IDs)
+  // Groq Roster (gpt-oss-120b -> llama-3.3-70b-versatile -> gpt-oss-20b)
   if (groqKey) {
     const modelsToTry = [
-      "openai/gpt-oss-120b",
       "llama-3.3-70b-versatile",
+      "openai/gpt-oss-120b",
       "openai/gpt-oss-20b",
-      "qwen/qwen3.6-27b",
-      "mixtral-8x7b-32768",
-      "gemma2-9b-it"
+      "qwen/qwen3.6-27b"
     ];
 
     for (const model of modelsToTry) {
@@ -267,7 +269,7 @@ async function generateLegalAnswer(
             model,
             messages,
             temperature: 0.1,
-            max_tokens: 1500,
+            max_tokens: 2500, // Provides ample room to finish complete answers
           }),
         });
 
@@ -289,7 +291,7 @@ async function generateLegalAnswer(
     }
   }
 
-  // 2. OpenAI Fallback
+  // OpenAI Fallback
   if (openAiKey) {
     try {
       const resp = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -302,7 +304,7 @@ async function generateLegalAnswer(
           model: "gpt-4o-mini",
           messages,
           temperature: 0.1,
-          max_tokens: 1500,
+          max_tokens: 2500,
         }),
       });
 
