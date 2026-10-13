@@ -12,6 +12,7 @@ const corsHeaders = {
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 const TRIAL_LIMIT = 10;
+const MAX_FOLLOWUP_QUESTIONS = 9;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
@@ -56,13 +57,20 @@ async function createQueryEmbedding(query: string): Promise<number[]> {
 }
 
 // ============================================================
-// USAGE TRACKING (10 Free Trial Messages Per User)
+// USAGE & SUBSCRIPTION TRACKING
 // ============================================================
 
-async function getUserUsage(userId: string): Promise<{ used: number; limit: number }> {
+interface UserStatus {
+  used: number;
+  limit: number;
+  isSubscribed: boolean;
+  tier: string;
+}
+
+async function getUserStatus(userId: string): Promise<UserStatus> {
   const { data } = await supabase
     .from("user_usage")
-    .select("trial_messages_used, trial_limit")
+    .select("trial_messages_used, trial_limit, is_subscribed, subscription_tier, subscription_expires_at")
     .eq("user_id", userId)
     .maybeSingle();
 
@@ -71,19 +79,33 @@ async function getUserUsage(userId: string): Promise<{ used: number; limit: numb
       user_id: userId,
       trial_messages_used: 0,
       trial_limit: TRIAL_LIMIT,
+      is_subscribed: false,
+      subscription_tier: "free",
     });
-    return { used: 0, limit: TRIAL_LIMIT };
+    return { used: 0, limit: TRIAL_LIMIT, isSubscribed: false, tier: "free" };
   }
 
-  return { used: data.trial_messages_used || 0, limit: data.trial_limit || TRIAL_LIMIT };
+  // Check subscription expiry
+  let isActive = Boolean(data.is_subscribed);
+  if (isActive && data.subscription_expires_at) {
+    isActive = new Date(data.subscription_expires_at) > new Date();
+  }
+
+  return {
+    used: data.trial_messages_used || 0,
+    limit: data.trial_limit || TRIAL_LIMIT,
+    isSubscribed: isActive,
+    tier: data.subscription_tier || "free",
+  };
 }
 
-async function incrementUsage(userId: string): Promise<{ used: number; limit: number }> {
-  const current = await getUserUsage(userId);
+async function incrementUsage(userId: string, isSubscribed: boolean): Promise<UserStatus> {
+  const current = await getUserStatus(userId);
 
-  if (current.used >= current.limit) {
-    return current;
-  }
+  // Subscribed users bypass the trial counter
+  if (isSubscribed) return current;
+
+  if (current.used >= current.limit) return current;
 
   const newCount = current.used + 1;
   await supabase
@@ -91,7 +113,62 @@ async function incrementUsage(userId: string): Promise<{ used: number; limit: nu
     .update({ trial_messages_used: newCount, updated_at: new Date().toISOString() })
     .eq("user_id", userId);
 
-  return { used: newCount, limit: current.limit };
+  return { ...current, used: newCount };
+}
+
+// ============================================================
+// INQUIRY SESSION TRACKING (9 FOLLOW-UP QUESTIONS)
+// ============================================================
+
+interface InquirySession {
+  id: string;
+  conversation_id: string;
+  original_question: string;
+  questions_asked: number;
+  facts_gathered: any[];
+  final_analysis_delivered: boolean;
+}
+
+async function getActiveInquirySession(conversationId: string): Promise<InquirySession | null> {
+  const { data } = await supabase
+    .from("inquiry_sessions")
+    .select("*")
+    .eq("conversation_id", conversationId)
+    .eq("final_analysis_delivered", false)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  return data as InquirySession | null;
+}
+
+async function createInquirySession(userId: string, conversationId: string, originalQuestion: string) {
+  const { data } = await supabase
+    .from("inquiry_sessions")
+    .insert({
+      conversation_id: conversationId,
+      user_id: userId,
+      original_question: originalQuestion,
+      questions_asked: 0,
+      facts_gathered: [],
+      final_analysis_delivered: false,
+    })
+    .select("*")
+    .single();
+
+  return data as InquirySession;
+}
+
+async function updateInquirySession(sessionId: string, questionsAsked: number, factsGathered: any[], delivered = false) {
+  await supabase
+    .from("inquiry_sessions")
+    .update({
+      questions_asked: questionsAsked,
+      facts_gathered: factsGathered,
+      final_analysis_delivered: delivered,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", sessionId);
 }
 
 // ============================================================
@@ -105,7 +182,6 @@ async function listConversations(userId: string) {
     .eq("user_id", userId)
     .order("updated_at", { ascending: false })
     .limit(50);
-
   return data || [];
 }
 
@@ -116,17 +192,13 @@ async function loadConversationHistory(conversationId: string) {
     .eq("conversation_id", conversationId)
     .order("created_at", { ascending: true })
     .limit(100);
-
   return data || [];
 }
 
 async function saveMessage(conversationId: string, role: string, content: string) {
   await supabase.from("messages").insert({
-    conversation_id: conversationId,
-    role,
-    content,
+    conversation_id: conversationId, role, content,
   });
-
   await supabase
     .from("conversations")
     .update({ updated_at: new Date().toISOString() })
@@ -139,11 +211,11 @@ async function createConversation(userId: string, title: string, jurisdiction: s
     .insert({ user_id: userId, title, jurisdiction })
     .select("id")
     .single();
-
   return data?.id || null;
 }
 
 async function deleteConversation(conversationId: string) {
+  await supabase.from("inquiry_sessions").delete().eq("conversation_id", conversationId);
   await supabase.from("messages").delete().eq("conversation_id", conversationId);
   await supabase.from("conversations").delete().eq("id", conversationId);
 }
@@ -277,7 +349,44 @@ async function retrieveStatutoryContext(query: string, jurisdiction: string): Pr
 }
 
 // ============================================================
-// LLM GENERATION (Text + Vision)
+// INTENT DETECTION
+// ============================================================
+
+function detectQueryIntent(query: string, hasActiveSession: boolean): "statutory_lookup" | "advice_needed" | "skip_questions" {
+  const lower = query.toLowerCase();
+
+  if (hasActiveSession) return "advice_needed";
+
+  if (lower.includes("skip questions") || lower.includes("just answer") || 
+      lower.includes("general answer") || lower.includes("no follow-up") ||
+      lower.includes("brief answer")) {
+    return "skip_questions";
+  }
+
+  if (/^(what|define|explain|summarize|list).*(section|article|act|law|statute|rule)/i.test(query) ||
+      /^(section|s\.|article|art\.)\s*\d+/i.test(query)) {
+    return "statutory_lookup";
+  }
+
+  const adviceKeywords = [
+    "can i", "should i", "what should", "what can", "advise", "advice",
+    "my situation", "my case", "i was", "i am", "i have", "my client",
+    "sued", "arrested", "charged", "contract", "divorce", "custody",
+    "liability", "damages", "sentenced", "fired", "dismissed",
+    "agreement", "dispute", "owe", "owed", "evicted", "landlord",
+    "tenant", "accident", "injured", "injury", "will", "estate",
+    "problem", "issue", "complaint", "complaining", "help me"
+  ];
+
+  if (adviceKeywords.some(k => lower.includes(k))) {
+    return "advice_needed";
+  }
+
+  return "statutory_lookup";
+}
+
+// ============================================================
+// LLM GENERATION
 // ============================================================
 
 async function generateAnswer(
@@ -292,7 +401,7 @@ async function generateAnswer(
 
   const sanitizedHistory = (history || [])
     .filter((m: any) => m && typeof m.content === "string" && (m.role === "user" || m.role === "assistant"))
-    .slice(-4)
+    .slice(-10)
     .map((m: any) => ({ role: m.role, content: String(m.content) }));
 
   const messages = [
@@ -314,7 +423,7 @@ async function generateAnswer(
         const resp = await fetch("https://api.groq.com/openai/v1/chat/completions", {
           method: "POST",
           headers: { Authorization: `Bearer ${groqKey}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ model, messages, temperature: 0.1, max_tokens: 2500 }),
+          body: JSON.stringify({ model, messages, temperature: 0.1, max_tokens: 3000 }),
         });
 
         if (resp.ok) {
@@ -335,7 +444,7 @@ async function generateAnswer(
       const resp = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: { Authorization: `Bearer ${openAiKey}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ model: "gpt-4o-mini", messages, temperature: 0.1, max_tokens: 2500 }),
+        body: JSON.stringify({ model: "gpt-4o-mini", messages, temperature: 0.1, max_tokens: 3000 }),
       });
 
       if (resp.ok) {
@@ -351,6 +460,157 @@ async function generateAnswer(
 }
 
 // ============================================================
+// PROMPT BUILDERS
+// ============================================================
+
+function buildStatutorySystemPrompt(jurisdiction: string): string {
+  return `You are LexAI, an authoritative statutory intelligence assistant for ${jurisdiction.toUpperCase()} law.
+
+RULES:
+1. STRICT GROUNDING: Base answers strictly on the STATUTORY CONTEXT provided.
+2. Use structured bullet points.
+3. Always conclude completely. Never end mid-sentence.
+4. Include every relevant subsection from the context.`;
+}
+
+function buildFollowUpSystemPrompt(jurisdiction: string, questionNumber: number, originalQuestion: string): string {
+  return `You are LexAI, a professional legal advisor practicing ${jurisdiction.toUpperCase()} law.
+
+CRITICAL FACT-GATHERING PROTOCOL:
+You are in the middle of a structured interview with the user. The user's original legal issue is:
+"${originalQuestion}"
+
+This is follow-up question ${questionNumber} of ${MAX_FOLLOWUP_QUESTIONS}. You have ${MAX_FOLLOWUP_QUESTIONS - questionNumber} questions remaining before you must provide final advice.
+
+INSTRUCTIONS:
+1. Acknowledge the user's latest answer in 1 brief sentence.
+2. Based on their answer so far, ask ONE focused next question to gather critical missing information.
+3. The question should progressively narrow down into:
+   - Parties involved (names, roles, relationships)
+   - Timeline (dates of key events, duration of issues)
+   - Jurisdiction specifics (state, court, authority involved)
+   - Documents and evidence (contracts, notices, receipts, witnesses)
+   - Prior actions taken (reports, complaints, legal correspondence)
+   - Outcome sought (compensation, injunction, criminal charges, settlement)
+   - Current stage of the matter
+   - Opposing party's position
+   - Any special circumstances (minors, disability, emergencies, deadlines)
+
+Format your response as:
+
+### Thank You for That Detail
+<Brief 1-sentence acknowledgment>
+
+### Follow-up Question ${questionNumber} of ${MAX_FOLLOWUP_QUESTIONS}
+<Your single focused question here>
+
+**(Why I'm asking):** <Brief 1-sentence reason this fact matters for your legal analysis>
+
+---
+*You can type "skip questions" at any time to receive a general answer with limited specificity.*
+
+DO NOT provide legal advice yet. Only ask the next question.`;
+}
+
+function buildFinalSubscribedPrompt(jurisdiction: string, factsSummary: string): string {
+  return `You are LexAI, an elite legal advisor practicing ${jurisdiction.toUpperCase()} law.
+
+You have completed a thorough fact-gathering interview. Now provide a COMPLETE, DETAILED, PROFESSIONAL LEGAL ANALYSIS.
+
+FACTS GATHERED FROM USER:
+${factsSummary}
+
+STRUCTURE YOUR FINAL ANALYSIS:
+
+### Executive Summary
+<2-3 sentence overview of the legal position>
+
+### Jurisdiction & Applicable Law
+<State the exact jurisdiction, applicable statute(s), and section numbers from STATUTORY CONTEXT>
+
+### Detailed Legal Analysis
+<Comprehensive multi-paragraph analysis connecting each fact to the applicable law. Address each legal issue separately. Cite exact section numbers.>
+
+### Rights and Obligations of Each Party
+<Clearly outline what each party is legally entitled to and obligated to do>
+
+### Procedural Steps Required
+<Step-by-step procedural guidance, including filing deadlines, courts of competent jurisdiction, required documents, and service requirements>
+
+### Likely Outcomes and Risk Assessment
+<Realistic assessment of possible outcomes including best case, worst case, and most likely scenario>
+
+### Strategic Recommendations
+<Practical, actionable guidance tailored to the user's specific circumstances>
+
+### Required Documentation
+<List all documents the user needs to prepare or obtain>
+
+### Deadlines and Time-Sensitive Actions
+<Any statutory deadlines, limitation periods, or urgent actions required>
+
+### Alternative Options
+<Any out-of-court settlement, mediation, arbitration, or alternative dispute resolution options>
+
+### Verification Status
+<VERIFIED based on cited statutory authorities>
+
+RULES:
+- Base ALL legal reasoning strictly on the STATUTORY CONTEXT and gathered facts.
+- Never fabricate case names, sections, or quotations.
+- Always cite exact section numbers.
+- Finish your analysis completely without cutting off.`;
+}
+
+function buildFinalFreeTierPrompt(jurisdiction: string, factsSummary: string): string {
+  return `You are LexAI, a legal advisor practicing ${jurisdiction.toUpperCase()} law.
+
+You have completed fact-gathering with a FREE TIER user. Provide a BRIEF SUMMARY ONLY, then prompt them to upgrade for the full detailed analysis.
+
+FACTS GATHERED FROM USER:
+${factsSummary}
+
+STRUCTURE YOUR SUMMARY:
+
+### Preliminary Summary of Your Legal Position
+<3-4 sentence overview identifying the main legal issue and general position under ${jurisdiction.toUpperCase()} law. Reference the applicable statute by name only.>
+
+### Key Legal Issues Identified
+<Short bulleted list of 3-4 key legal issues in the user's situation. One line each.>
+
+### What's Included in Your Full Analysis (Upgrade Required)
+<Brief 1-sentence description of each of these:
+- Detailed statutory analysis with exact section numbers
+- Rights and obligations of each party
+- Step-by-step procedural guidance
+- Deadlines and time-sensitive actions
+- Required documentation
+- Likely outcomes and risk assessment
+- Strategic recommendations tailored to your case
+- Alternative dispute resolution options>
+
+### 🔒 Unlock Full Legal Analysis
+Your situation requires detailed legal analysis to protect your interests. Upgrade to **LexAI Premium** to receive:
+- ✓ Complete statutory analysis with citations
+- ✓ Full procedural roadmap and deadlines
+- ✓ Rights, obligations, and strategic recommendations
+- ✓ Unlimited inquiries and document reviews
+- ✓ Priority access to legal verification
+
+[**→ Upgrade to Premium**](/contact)
+
+---
+
+*LexAI provides legal information, not legal representation. Verify crucial legal steps with qualified counsel.*
+
+RULES:
+- Keep the summary brief (under 400 words total).
+- Mention the applicable statute by name but DO NOT provide specific section numbers or detailed analysis.
+- Make the upgrade value clear without being pushy.
+- Base the summary strictly on the STATUTORY CONTEXT and gathered facts.`;
+}
+
+// ============================================================
 // MAIN DISPATCHER
 // ============================================================
 
@@ -362,28 +622,24 @@ serve(async (req) => {
     const action = url.searchParams.get("action");
     const userId = url.searchParams.get("user_id") || "";
 
-    // ---- LIST CONVERSATIONS ----
     if (action === "list" && userId) {
       const conversations = await listConversations(userId);
-      const usage = await getUserUsage(userId);
-      return json({ conversations, usage });
+      const status = await getUserStatus(userId);
+      return json({ conversations, usage: status });
     }
 
-    // ---- LOAD HISTORY ----
     if (action === "history" && req.method === "POST") {
       const body = await req.json();
       const messages = await loadConversationHistory(body.conversation_id);
       return json({ messages });
     }
 
-    // ---- DELETE CONVERSATION ----
     if (action === "delete" && req.method === "POST") {
       const body = await req.json();
       await deleteConversation(body.conversation_id);
       return json({ success: true });
     }
 
-    // ---- MAIN CHAT ----
     const body = await req.json().catch(() => null);
     if (!body) return errorResponse("Invalid request.", 400);
 
@@ -391,25 +647,29 @@ serve(async (req) => {
     const attachment = body.attachment || null;
     const chatUserId = body.user_id || userId;
     const jurisdiction = normalizeJurisdiction(body.jurisdiction);
+    const history = Array.isArray(body.history) ? body.history : [];
 
-    // Check trial limit
-    if (chatUserId && chatUserId !== "authenticated_user") {
-      const usage = await getUserUsage(chatUserId);
-      if (usage.used >= usage.limit) {
-        return json({
-          paywall: true,
-          error: `You have used all ${TRIAL_LIMIT} free trial messages. Upgrade for unlimited access.`,
-          usage,
-        });
-      }
+    // Status check
+    const userStatus = chatUserId && chatUserId !== "authenticated_user"
+      ? await getUserStatus(chatUserId)
+      : { used: 0, limit: TRIAL_LIMIT, isSubscribed: false, tier: "free" };
+
+    // Trial limit enforcement (only for non-subscribers)
+    if (!userStatus.isSubscribed && userStatus.used >= userStatus.limit) {
+      return json({
+        paywall: true,
+        error: `You have used all ${TRIAL_LIMIT} free trial messages. Upgrade for unlimited access.`,
+        usage: userStatus,
+      });
     }
 
     let fullUserText = userMessage;
     let transcription = "";
     let userContentForLLM: string | Array<any> = "";
+    let hasAttachment = false;
 
-    // Process attachments
     if (attachment) {
+      hasAttachment = true;
       if (attachment.type === "audio" && attachment.base64) {
         transcription = await transcribeAudio(attachment.base64, attachment.mimeType);
         fullUserText = transcription + (userMessage ? `\n\n${userMessage}` : "");
@@ -418,7 +678,6 @@ serve(async (req) => {
       } else if (attachment.type === "text" && attachment.extractedText) {
         fullUserText = userMessage + `\n\n--- EXTRACTED DOCUMENT ---\n${attachment.extractedText.substring(0, 8000)}`;
       } else if (attachment.type === "image" && attachment.base64) {
-        // Vision: send image + text to vision model
         userContentForLLM = [
           { type: "text", text: fullUserText || "Analyze this image and describe any legal documents, contracts, or text visible." },
           { type: "image_url", image_url: { url: `data:${attachment.mimeType};base64,${attachment.base64}` } },
@@ -426,37 +685,136 @@ serve(async (req) => {
       }
     }
 
-    if (!userContentForLLM) {
-      // Text-only query: add statutory context
-      const chunks = await retrieveStatutoryContext(fullUserText, jurisdiction);
-      const contextPayload = chunks.length > 0
-        ? chunks.map((c, i) => `--- AUTHORITY [${i + 1}] ---\nDOCUMENT: ${c.document_title}\nSECTION: ${c.section_number || "General"}\nTEXT:\n${c.content.substring(0, 1000)}`).join("\n\n")
-        : "No indexed statutory provisions found.";
+    // VISION MODE
+    if (Array.isArray(userContentForLLM)) {
+      const systemPrompt = `You are LexAI, a legal document analysis assistant. Analyze the attached image carefully. If it contains a legal document, contract, or statutory text, identify key clauses, parties, dates, obligations, and potential legal issues. Provide structured analysis.`;
+      const answer = await generateAnswer(systemPrompt, userContentForLLM, history);
 
-      const systemPrompt = `You are LexAI, an authoritative statutory intelligence assistant for ${jurisdiction.toUpperCase()} law.
-RULES:
-1. STRICT GROUNDING: Base answers on the STATUTORY CONTEXT provided. Do not fabricate sections.
-2. Use structured bullet points. Always conclude completely. Never end mid-sentence.`;
-
-      userContentForLLM = `STATUTORY CONTEXT:\n${contextPayload}\n\nUSER QUESTION:\n${fullUserText}`;
-
-      // Generate answer
-      const answer = await generateAnswer(systemPrompt, userContentForLLM, body.history || []);
-
-      // Save to history
       let convId = body.conversation_id;
       if (chatUserId && chatUserId !== "authenticated_user") {
-        if (!convId) {
-          convId = await createConversation(chatUserId, fullUserText.substring(0, 60), jurisdiction);
-        }
+        if (!convId) convId = await createConversation(chatUserId, "Image Analysis", jurisdiction);
         if (convId) {
-          await saveMessage(convId, "user", fullUserText);
+          await saveMessage(convId, "user", fullUserText || "[Image attached]");
           await saveMessage(convId, "assistant", answer);
         }
-        await incrementUsage(chatUserId);
+        const updated = await incrementUsage(chatUserId, userStatus.isSubscribed);
+        return json({
+          success: true, answer, conversation_id: convId, citations: [],
+          transcription: transcription || undefined, usage: updated,
+        });
       }
 
-      const usage = chatUserId ? await getUserUsage(chatUserId) : { used: 0, limit: TRIAL_LIMIT };
+      return json({
+        success: true, answer, conversation_id: null, citations: [],
+        transcription: transcription || undefined, usage: userStatus,
+      });
+    }
+
+    // Load or create conversation ID
+    let convId = body.conversation_id;
+    if (chatUserId && chatUserId !== "authenticated_user" && !convId) {
+      convId = await createConversation(chatUserId, fullUserText.substring(0, 60), jurisdiction);
+    }
+
+    // Check for active inquiry session
+    let activeSession: InquirySession | null = null;
+    if (convId) {
+      activeSession = await getActiveInquirySession(convId);
+    }
+
+    const intent = hasAttachment ? "statutory_lookup" : detectQueryIntent(fullUserText, Boolean(activeSession));
+
+    // Retrieve statutory context
+    const chunks = await retrieveStatutoryContext(
+      activeSession?.original_question || fullUserText, 
+      jurisdiction
+    );
+    const contextPayload = chunks.length > 0
+      ? chunks.map((c, i) => `--- AUTHORITY [${i + 1}] ---\nDOCUMENT: ${c.document_title}\nSECTION: ${c.section_number || "General"}\nTEXT:\n${c.content.substring(0, 1000)}`).join("\n\n")
+      : "No indexed statutory provisions found.";
+
+    let systemPrompt: string;
+    let answer: string;
+    let shouldDeliverFinal = false;
+
+    // ========== ADVICE FLOW WITH 9 FOLLOW-UP QUESTIONS ==========
+    if (intent === "advice_needed" && convId) {
+      // Create session on first advice query
+      if (!activeSession && chatUserId && chatUserId !== "authenticated_user") {
+        activeSession = await createInquirySession(chatUserId, convId, fullUserText);
+      }
+
+      const questionsAsked = activeSession?.questions_asked || 0;
+      const factsGathered = activeSession?.facts_gathered || [];
+
+      // Record user's latest answer as a fact
+      if (questionsAsked > 0 && activeSession) {
+        factsGathered.push({
+          question_number: questionsAsked,
+          user_response: fullUserText,
+          timestamp: new Date().toISOString(),
+        });
+      }
+
+      const nextQuestionNumber = questionsAsked + 1;
+
+      // Check if we've completed all 9 questions -> deliver final analysis
+      if (questionsAsked >= MAX_FOLLOWUP_QUESTIONS) {
+        shouldDeliverFinal = true;
+
+        const factsSummary = [
+          `Original Issue: ${activeSession?.original_question || fullUserText}`,
+          ...factsGathered.map((f: any, i: number) =>
+            `Fact ${i + 1}: ${f.user_response}`
+          ),
+          `Latest User Input: ${fullUserText}`,
+        ].join("\n\n");
+
+        // Deliver tiered response based on subscription
+        if (userStatus.isSubscribed) {
+          systemPrompt = buildFinalSubscribedPrompt(jurisdiction, factsSummary);
+        } else {
+          systemPrompt = buildFinalFreeTierPrompt(jurisdiction, factsSummary);
+        }
+
+        userContentForLLM = `STATUTORY CONTEXT:\n${contextPayload}\n\nFACTS GATHERED FROM USER:\n${factsSummary}\n\nUSER'S FINAL INPUT:\n${fullUserText}`;
+
+        answer = await generateAnswer(systemPrompt, userContentForLLM, history);
+
+        // Mark session as delivered
+        if (activeSession) {
+          await updateInquirySession(activeSession.id, questionsAsked, factsGathered, true);
+        }
+      } else {
+        // Ask the next follow-up question
+        systemPrompt = buildFollowUpSystemPrompt(
+          jurisdiction, 
+          nextQuestionNumber, 
+          activeSession?.original_question || fullUserText
+        );
+
+        userContentForLLM = `STATUTORY CONTEXT:\n${contextPayload}\n\nFACTS GATHERED SO FAR:\n${JSON.stringify(factsGathered, null, 2)}\n\nUSER'S LATEST MESSAGE:\n${fullUserText}`;
+
+        answer = await generateAnswer(systemPrompt, userContentForLLM, history);
+
+        // Update session with new question count
+        if (activeSession) {
+          await updateInquirySession(activeSession.id, nextQuestionNumber, factsGathered, false);
+        }
+      }
+    }
+    // ========== STATUTORY LOOKUP OR SKIP MODE ==========
+    else {
+      systemPrompt = buildStatutorySystemPrompt(jurisdiction);
+      userContentForLLM = `STATUTORY CONTEXT:\n${contextPayload}\n\nUSER MESSAGE:\n${fullUserText}`;
+      answer = await generateAnswer(systemPrompt, userContentForLLM, history);
+    }
+
+    // Save messages
+    if (chatUserId && chatUserId !== "authenticated_user" && convId) {
+      await saveMessage(convId, "user", fullUserText);
+      await saveMessage(convId, "assistant", answer);
+      const updated = await incrementUsage(chatUserId, userStatus.isSubscribed);
 
       const citations = (chunks || []).map((c) => ({
         text: c.section_number ? `Section ${c.section_number} — ${c.document_title || "Statute"}` : c.source_locator,
@@ -473,35 +831,33 @@ RULES:
         conversation_id: convId,
         citations,
         transcription: transcription || undefined,
-        usage,
-      });
-    } else {
-      // Vision query (image attached)
-      const systemPrompt = `You are LexAI, a legal document analysis assistant. Analyze the attached image carefully. If it contains a legal document, contract, or statutory text, identify key clauses, parties, dates, obligations, and potential legal issues. Provide structured analysis.`;
-
-      const answer = await generateAnswer(systemPrompt, userContentForLLM, body.history || []);
-
-      let convId = body.conversation_id;
-      if (chatUserId && chatUserId !== "authenticated_user") {
-        if (!convId) convId = await createConversation(chatUserId, "Image Analysis", jurisdiction);
-        if (convId) {
-          await saveMessage(convId, "user", fullUserText || "[Image attached]");
-          await saveMessage(convId, "assistant", answer);
-        }
-        await incrementUsage(chatUserId);
-      }
-
-      const usage = chatUserId ? await getUserUsage(chatUserId) : { used: 0, limit: TRIAL_LIMIT };
-
-      return json({
-        success: true,
-        answer,
-        conversation_id: convId,
-        citations: [],
-        transcription: transcription || undefined,
-        usage,
+        usage: updated,
+        inquiry_status: activeSession ? {
+          questions_asked: shouldDeliverFinal ? MAX_FOLLOWUP_QUESTIONS : (activeSession.questions_asked + 1),
+          questions_remaining: shouldDeliverFinal ? 0 : (MAX_FOLLOWUP_QUESTIONS - activeSession.questions_asked - 1),
+          final_delivered: shouldDeliverFinal,
+          is_subscribed: userStatus.isSubscribed,
+        } : null,
       });
     }
+
+    const citations = (chunks || []).map((c) => ({
+      text: c.section_number ? `Section ${c.section_number} — ${c.document_title || "Statute"}` : c.source_locator,
+      url: buildCitationUrl(c),
+      section: c.section_number ? `Section ${c.section_number}` : null,
+      subsection: c.subsection,
+      status: c.current_status || "verified",
+      similarity: Number((c.similarity || 0).toFixed(3)),
+    }));
+
+    return json({
+      success: true,
+      answer,
+      conversation_id: convId,
+      citations,
+      transcription: transcription || undefined,
+      usage: userStatus,
+    });
   } catch (error: any) {
     console.error("Chat Error:", error);
     return errorResponse(error?.message || "Chat service error", 500);
