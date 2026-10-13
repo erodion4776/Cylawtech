@@ -1301,7 +1301,7 @@ export default function AdminSaaS() {
                   <p className="text-[10px] uppercase font-bold tracking-wider text-blue-400">Legal Source Preview</p>
                   <h3 className="text-base sm:text-xl font-black text-white truncate mt-1">{preview?.document?.title || selectedDocument?.title || 'Document Preview'}</h3>
                 </div>
-                <button onClick={() => setPreviewOpen(false)} className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border-0"><X size={18} /></button>
+                <button onClick={() => setPreviewOpen(false)} className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border-0 cursor-pointer"><X size={18} /></button>
               </div>
 
               {previewLoading ? (
@@ -1375,12 +1375,12 @@ export default function AdminSaaS() {
                   </div>
 
                   <div className="p-4 border-t border-slate-800 bg-slate-900 flex flex-col sm:flex-row gap-2 shrink-0">
-                    <button onClick={() => setPreviewOpen(false)} className="flex-1 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold border-0">Close Preview</button>
+                    <button onClick={() => setPreviewOpen(false)} className="flex-1 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold border-0 cursor-pointer">Close Preview</button>
                     {preview.document.status !== 'completed' && preview.document.status !== 'rejected' && (
-                      <button onClick={() => { setPreviewOpen(false); indexDocument(preview.document); }} disabled={isIndexing} className="flex-1 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold border-0 flex items-center justify-center gap-2 disabled:opacity-50"><Play size={14} />Approve & Index</button>
+                      <button onClick={() => { setPreviewOpen(false); indexDocument(preview.document); }} disabled={isIndexing} className="flex-1 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold border-0 flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"><Play size={14} />Approve & Index</button>
                     )}
                     {preview.document.status === 'completed' && (
-                      <button onClick={() => { setPreviewOpen(false); indexDocument(preview.document, true); }} disabled={isIndexing} className="flex-1 py-3 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold border-0 flex items-center justify-center gap-2 disabled:opacity-50"><RefreshCw size={14} />Reindex</button>
+                      <button onClick={() => { setPreviewOpen(false); indexDocument(preview.document, true); }} disabled={isIndexing} className="flex-1 py-3 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold border-0 flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"><RefreshCw size={14} />Reindex</button>
                     )}
                   </div>
                 </>
