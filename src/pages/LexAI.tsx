@@ -5,7 +5,7 @@ import {
   Scale, Menu, X, Home, Info, Mail,
   Lock, Sparkles, ChevronDown, Copy, Check, Pencil,
   LogOut, User as UserIcon, Paperclip, FileText, Image as ImageIcon,
-  Mic, Square, Volume2, ExternalLink, ShieldCheck, AlertTriangle, Globe
+  Mic, Square, Volume2, ExternalLink, ShieldCheck
 } from 'lucide-react';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import { cn } from '../lib/utils';
@@ -15,7 +15,7 @@ import Markdown from 'react-markdown';
 
 const API_BASE = '/api/chat';
 const VERIFY_API = '/api/verify';
-const DAILY_LIMIT = 15;
+const TRIAL_LIMIT = 10;
 
 // ============================================================
 // FILE PROCESSING HELPERS
@@ -151,12 +151,6 @@ interface Message {
   role: 'user' | 'assistant';
   content: string;
   citations?: Citation[];
-  verified_site?: {
-    url: string;
-    status: string;
-    confidence: number;
-    warnings?: string[];
-  };
 }
 
 // ============================================================
@@ -189,7 +183,7 @@ const LexAI: React.FC = () => {
   const recordingTimerRef = useRef<any>(null);
 
   // Usage & Paywall
-  const [dbUsageCount, setDbUsageCount] = useState(0);
+  const [trialUsed, setTrialUsed] = useState(0);
   const [showPaywall, setShowPaywall] = useState(false);
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
 
@@ -221,8 +215,8 @@ const LexAI: React.FC = () => {
         const data = await res.json();
         setConversations(data.conversations || []);
         if (data.usage) {
-          setDbUsageCount(data.usage.count || 0);
-          if (data.usage.count >= DAILY_LIMIT) setShowPaywall(true);
+          setTrialUsed(data.usage.used || 0);
+          if (data.usage.used >= TRIAL_LIMIT) setShowPaywall(true);
         }
       }
     } catch { /* silent */ }
@@ -403,7 +397,7 @@ const LexAI: React.FC = () => {
     const textToSend = (overrideMessage || input).trim();
     if ((!textToSend && !attachment) || isLoading) return;
 
-    if (dbUsageCount >= DAILY_LIMIT) {
+    if (trialUsed >= TRIAL_LIMIT) {
       setShowPaywall(true);
       return;
     }
@@ -420,6 +414,7 @@ const LexAI: React.FC = () => {
       displayMsg = `${textToSend}\n\n📎 *Attached: ${currentAttachment.name}*`;
     }
 
+    const userMessageIndex = messages.length;
     const updatedMessages: Message[] = [...messages, { role: 'user', content: displayMsg }];
     setMessages(updatedMessages);
     setIsLoading(true);
@@ -430,7 +425,7 @@ const LexAI: React.FC = () => {
 
     try {
       if (isUrlVerification) {
-        // Send to verify endpoint
+        // Site Verification Pipeline
         const verifyRes = await fetch(VERIFY_API, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -468,12 +463,6 @@ ${verifyData.warnings?.length ? `\n**Warnings:**\n${verifyData.warnings.map((w: 
               role: 'assistant',
               content: answerContent,
               citations,
-              verified_site: {
-                url: verifyData.final_url,
-                status: verifyData.verification_status,
-                confidence: verifyData.confidence_score,
-                warnings: verifyData.warnings,
-              },
             },
           ]);
           setIsLoading(false);
@@ -487,9 +476,9 @@ ${verifyData.warnings?.length ? `\n**Warnings:**\n${verifyData.warnings.map((w: 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: textToSend,
-          history: updatedMessages.slice(-6),
+          history: messages.slice(-6).map((m) => ({ role: m.role, content: m.content })),
           conversation_id: activeConvId,
-          jurisdiction: jurisdiction === 'nigeria' ? 'Nigerian Law' : 'US Federal Law',
+          jurisdiction,
           user_id: user?.id || 'authenticated_user',
           attachment: currentAttachment,
         }),
@@ -497,8 +486,27 @@ ${verifyData.warnings?.length ? `\n**Warnings:**\n${verifyData.warnings.map((w: 
 
       const data = await res.json();
 
-      if (data.paywall) setShowPaywall(true);
-      if (data.usage) setDbUsageCount(data.usage.count);
+      if (data.paywall) {
+        setShowPaywall(true);
+      }
+
+      if (data.usage) {
+        setTrialUsed(data.usage.used || 0);
+      }
+
+      // Handle transcription of voice notes
+      if (data.transcription) {
+        setMessages((prev) => {
+          const clone = [...prev];
+          if (clone[userMessageIndex]) {
+            clone[userMessageIndex] = {
+              ...clone[userMessageIndex],
+              content: `🎙️ *Voice Note:* "${data.transcription}"${textToSend ? `\n\n${textToSend}` : ''}`,
+            };
+          }
+          return clone;
+        });
+      }
 
       const assistantReply = data.answer || data.response || data.error || 'No response generated.';
       const citations: Citation[] = Array.isArray(data.citations) ? data.citations : [];
@@ -544,8 +552,8 @@ ${verifyData.warnings?.length ? `\n**Warnings:**\n${verifyData.warnings.map((w: 
     }
   };
 
-  const messagesRemaining = Math.max(0, DAILY_LIMIT - dbUsageCount);
-  const jurLabel = jurisdiction === 'nigeria' ? '🇳🇬 Nigerian Law' : '🇺🇸 US Law';
+  const messagesRemaining = Math.max(0, TRIAL_LIMIT - trialUsed);
+  const jurLabel = jurisdiction === 'nigeria' ? '🇳🇬 Nigerian Law' : jurisdiction === 'us' ? '🇺🇸 US Law' : '🌍 Global';
 
   return (
     <div className="fixed inset-0 h-[100dvh] w-full flex flex-col overflow-hidden bg-white dark:bg-[#171717] font-sans select-none">
@@ -567,12 +575,23 @@ ${verifyData.warnings?.length ? `\n**Warnings:**\n${verifyData.warnings.map((w: 
               <div className="w-12 h-12 bg-blue-600/10 text-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-4">
                 <Lock size={24} />
               </div>
-              <h2 className="text-xl font-black text-slate-900 dark:text-white mb-2">Daily Quota Reached</h2>
+              <h2 className="text-xl font-black text-slate-900 dark:text-white mb-2">Free Trial Completed</h2>
               <p className="text-slate-500 dark:text-slate-400 text-xs sm:text-sm mb-6 leading-relaxed">
-                You have reached your free daily allocation of {DAILY_LIMIT} inquiries.
+                You have used all {TRIAL_LIMIT} free trial messages. Upgrade for unlimited verified statutory research.
               </p>
+              <div className="grid grid-cols-2 gap-3 mb-6">
+                <div className="p-4 rounded-2xl bg-slate-50 dark:bg-[#252525] border border-slate-200 dark:border-slate-700 text-left">
+                  <p className="text-[9px] font-bold text-blue-600 uppercase">Monthly Practice</p>
+                  <h4 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white">$29<span className="text-[10px] font-normal text-slate-400">/mo</span></h4>
+                </div>
+                <div className="p-4 rounded-2xl bg-[#171717] text-white text-left relative overflow-hidden">
+                  <p className="text-[9px] font-bold text-[#B4975A] uppercase">Annual Counsel</p>
+                  <h4 className="text-lg sm:text-xl font-black">$249<span className="text-[10px] font-normal text-slate-400">/yr</span></h4>
+                  <Sparkles size={28} className="absolute -right-1 -bottom-1 opacity-10" />
+                </div>
+              </div>
               <button onClick={() => navigate('/contact')} className="w-full py-3.5 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl font-bold text-sm transition-all shadow-lg">
-                Upgrade for Unlimited Research
+                Upgrade for Unlimited Access
               </button>
               <button onClick={() => setShowPaywall(false)} className="mt-3 text-xs text-slate-400 hover:text-slate-600">
                 Dismiss
@@ -632,13 +651,13 @@ ${verifyData.warnings?.length ? `\n**Warnings:**\n${verifyData.warnings.map((w: 
 
               <div className="mx-3 mb-2 p-3 bg-white/5 rounded-xl border border-white/5">
                 <div className="flex justify-between items-center mb-1.5 text-[10px] font-bold tracking-wider text-slate-400 uppercase">
-                  <span>Daily Quota</span>
-                  <span>{dbUsageCount} / {DAILY_LIMIT}</span>
+                  <span>Free Trial</span>
+                  <span>{trialUsed} / {TRIAL_LIMIT}</span>
                 </div>
                 <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
                   <div
                     className={cn('h-full rounded-full transition-all duration-500', messagesRemaining === 0 ? 'bg-rose-500' : 'bg-[#B4975A]')}
-                    style={{ width: `${(dbUsageCount / DAILY_LIMIT) * 100}%` }}
+                    style={{ width: `${(trialUsed / TRIAL_LIMIT) * 100}%` }}
                   />
                 </div>
               </div>
@@ -760,7 +779,7 @@ ${verifyData.warnings?.length ? `\n**Warnings:**\n${verifyData.warnings.map((w: 
             </h2>
             
             <p className="text-slate-500 dark:text-slate-400 text-xs sm:text-sm mb-7 leading-relaxed max-w-md">
-              Ask statutory questions, paste legal website URLs for direct verification, or upload documents for admissibility review.
+              Ask statutory questions, record voice notes, upload contracts/photos, or paste legal URLs for direct verification against your knowledge base.
             </p>
 
             <div className="w-full space-y-2.5">
@@ -827,7 +846,7 @@ ${verifyData.warnings?.length ? `\n**Warnings:**\n${verifyData.warnings.map((w: 
                         </div>
                       )}
 
-                      {/* ==================== CLICKABLE CITATIONS SECTION ==================== */}
+                      {/* CLICKABLE CITATIONS */}
                       {!isUser && msg.citations && msg.citations.length > 0 && (
                         <div className="mt-4 pt-3 border-t border-slate-200/50 dark:border-white/10 space-y-1.5">
                           <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1">
@@ -919,7 +938,7 @@ ${verifyData.warnings?.length ? `\n**Warnings:**\n${verifyData.warnings.map((w: 
                 <div className="bg-slate-100 dark:bg-white/5 border border-slate-200/50 dark:border-white/5 rounded-2xl rounded-tl-md px-4 py-3.5 shadow-xs">
                   <div className="flex items-center gap-2">
                     <Loader2 size={14} className="animate-spin text-blue-600 dark:text-[#B4975A]" />
-                    <span className="text-xs text-slate-500 dark:text-slate-400">LexAI is searching statutory library & verifying citations...</span>
+                    <span className="text-xs text-slate-500 dark:text-slate-400">LexAI is retrieving statutes & verifying citations...</span>
                   </div>
                 </div>
               </motion.div>
@@ -1027,7 +1046,7 @@ ${verifyData.warnings?.length ? `\n**Warnings:**\n${verifyData.warnings.map((w: 
                     sendMessage();
                   }
                 }}
-                placeholder="Ask statutory question, paste website URL to verify, or record voice…"
+                placeholder="Ask legal question, paste URL to verify, upload PDF/image, or record voice…"
                 rows={1}
                 className="w-full py-3.5 pr-12 pl-2 bg-transparent text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 outline-none resize-none max-h-28"
                 style={{ minHeight: '48px' }}
@@ -1055,8 +1074,8 @@ ${verifyData.warnings?.length ? `\n**Warnings:**\n${verifyData.warnings.map((w: 
           )}
 
           <div className="flex flex-col sm:flex-row justify-between items-center px-1 mt-2 text-[10px] text-slate-400 dark:text-slate-500 gap-1 text-center sm:text-left leading-tight">
-            <span>{messagesRemaining} verified statutory inquiries left today.</span>
-            <span>LexAI provides grounded statutory analysis. Verify crucial legal steps with qualified counsel.</span>
+            <span>{messagesRemaining} of {TRIAL_LIMIT} free trial messages remaining.</span>
+            <span>LexAI provides grounded statutory analysis. Verify crucial steps with qualified counsel.</span>
           </div>
         </div>
       </div>
