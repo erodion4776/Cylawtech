@@ -43,7 +43,7 @@ function json(data: unknown, status = 200) {
 }
 
 function errorResponse(message: string, status = 500, extra: Record<string, unknown> = {}) {
-  return json({ error: message, ...extra }, status);
+  return json({ success: false, error: message, ...extra }, status);
 }
 
 function cleanString(value: unknown, fallback = ""): string {
@@ -99,7 +99,7 @@ function normalizeWhitespace(text: string): string {
 }
 
 // ============================================================
-// SSRF PROTECTION
+// SSRF PROTECTION & FETCH
 // ============================================================
 
 function isPrivateIPv4(hostname: string): boolean {
@@ -179,7 +179,7 @@ function htmlToText(html: string): string {
 }
 
 // ============================================================
-// STATUTORY PARSING & CHUNKING
+// STATUTORY PARSER & CHUNKING
 // ============================================================
 
 const EXPLICIT_SECTION_REGEX =
@@ -373,11 +373,10 @@ function createPreview(title: string, content: string, jurisdiction = "nigeria")
 }
 
 // ============================================================
-// USER MANAGEMENT (NEW)
+// USER MANAGEMENT
 // ============================================================
 
 async function listUsers() {
-  // Get all user usage records
   const { data: usageRecords, error: usageError } = await supabase
     .from("user_usage")
     .select("*")
@@ -386,10 +385,9 @@ async function listUsers() {
 
   if (usageError) throw usageError;
 
-  // Enrich with auth user emails via Supabase Admin API
   const users = [];
   for (const record of usageRecords || []) {
-    let email = "Unknown";
+    let email = "User";
     try {
       const { data: authUser } = await supabase.auth.admin.getUserById(record.user_id);
       if (authUser?.user?.email) email = authUser.user.email;
@@ -483,20 +481,31 @@ async function logQAError(req: Request) {
   }).select().single();
 
   if (error) throw error;
-  return json({ success: true, message: "QA Error Logged.", log: data }, 201);
+  return json({ success: true, message: "QA Error Logged.", data }, 201);
 }
 
 // ============================================================
-// SETTINGS & API KEYS
+// SETTINGS (WITH AUTO-CREATION TO PREVENT 404)
 // ============================================================
 
 async function handleSettings(method: string, req: Request) {
   if (method === "GET") {
-    const { data, error } = await supabase.from("settings").select("*").limit(1).maybeSingle();
+    let { data, error } = await supabase.from("settings").select("*").limit(1).maybeSingle();
     if (error) throw error;
-    if (!data) return errorResponse("Settings not found.", 404);
-    return json(data);
+
+    // If table is empty, auto-create default row so login never fails with 404
+    if (!data) {
+      const { data: created, error: createError } = await supabase
+        .from("settings")
+        .insert({ api_enabled: true, active_model: "llama-3.3-70b-versatile" })
+        .select()
+        .single();
+      if (!createError && created) data = created;
+    }
+
+    return json({ success: true, data: data || { api_enabled: true, active_model: "llama-3.3-70b-versatile" } });
   }
+
   if (method === "PATCH") {
     const body = await req.json();
     const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
@@ -506,7 +515,7 @@ async function handleSettings(method: string, req: Request) {
     if (body.id) query = query.eq("id", body.id);
     const { data, error } = await query.select().single();
     if (error) throw error;
-    return json(data);
+    return json({ success: true, data });
   }
   return errorResponse("Method not allowed.", 405);
 }
@@ -515,7 +524,7 @@ async function handleKeys(method: string, path: string, req: Request) {
   if (method === "GET" && path === "keys") {
     const { data, error } = await supabase.from("api_keys").select("*").order("created_at", { ascending: false });
     if (error) throw error;
-    return json(data || []);
+    return json({ success: true, data: data || [] });
   }
   if (method === "POST" && path === "keys") {
     const body = await req.json();
@@ -524,7 +533,7 @@ async function handleKeys(method: string, path: string, req: Request) {
     const key = `lex_${crypto.randomUUID().replace(/-/g, "")}`;
     const { data, error } = await supabase.from("api_keys").insert({ key, site, status: "active" }).select().single();
     if (error) throw error;
-    return json(data, 201);
+    return json({ success: true, data }, 201);
   }
   if (method === "DELETE" && path.startsWith("keys/")) {
     const id = path.split("/")[1];
@@ -543,7 +552,7 @@ async function handleKeys(method: string, path: string, req: Request) {
 async function listDocuments() {
   const { data, error } = await supabase.from("documents").select("id,title,jurisdiction,document_type,authority_level,official_source,source_url,url_template,effective_from,effective_to,current_status,last_verified_at,verification_source,version_label,status,total_sections,processed_sections,error_log,created_at,updated_at").order("created_at", { ascending: false }).limit(150);
   if (error) throw error;
-  return json(data || []);
+  return json({ success: true, data: data || [] });
 }
 
 async function createDocument(req: Request) {
@@ -565,7 +574,7 @@ async function createDocument(req: Request) {
     version_label: cleanString(body.version_label) || null, status: "pending", total_sections: 0, processed_sections: 0, error_log: null,
   }).select().single();
   if (error) throw error;
-  return json({ success: true, message: "Document registered.", document: data }, 201);
+  return json({ success: true, message: "Document registered.", data }, 201);
 }
 
 async function importFromUrl(req: Request) {
@@ -610,7 +619,7 @@ async function previewDocument(documentId: string) {
   const preview = createPreview(document.title, document.content || "", document.jurisdiction || "nigeria");
   const { data: chunks, error } = await supabase.from("knowledge_chunks").select("id,content,section_number,subsection,source_locator").eq("document_id", documentId).order("id", { ascending: true }).limit(25);
   if (error) throw error;
-  return json({ success: true, metadata: { id: document.id, title: document.title, jurisdiction: document.jurisdiction, document_type: document.document_type, authority_level: document.authority_level, official_source: document.official_source, source_url: document.source_url, url_template: document.url_template, effective_from: document.effective_from, effective_to: document.effective_to, current_status: document.current_status, last_verified_at: document.last_verified_at, verification_source: document.verification_source, version_label: document.version_label, status: document.status }, full_content: document.content || "", sections_count: preview.sections_count, sections: preview.sections, planned_chunks: preview.planned_chunks, indexed_chunks: chunks || [] });
+  return json({ success: true, data: { metadata: { id: document.id, title: document.title, jurisdiction: document.jurisdiction, document_type: document.document_type, authority_level: document.authority_level, official_source: document.official_source, source_url: document.source_url, url_template: document.url_template, effective_from: document.effective_from, effective_to: document.effective_to, current_status: document.current_status, last_verified_at: document.last_verified_at, verification_source: document.verification_source, version_label: document.version_label, status: document.status }, full_content: document.content || "", sections_count: preview.sections_count, sections: preview.sections, planned_chunks: preview.planned_chunks, indexed_chunks: chunks || [] } });
 }
 
 async function startIndexing(documentId: string, req: Request, reset: boolean) {
@@ -622,7 +631,7 @@ async function startIndexing(documentId: string, req: Request, reset: boolean) {
   if (reset) { await prepareDocumentForIndexing(documentId); }
   else { offset = Number(document.processed_sections || 0); if (document.status === "pending" && offset === 0) await prepareDocumentForIndexing(documentId); }
   const result = await indexDocumentBatch(documentId, offset, batchSize);
-  return json({ success: true, message: result.completed ? "Indexing complete." : "Batch indexed.", document_id: documentId, ...result });
+  return json({ success: true, message: result.completed ? "Indexing complete." : "Batch indexed.", data: { document_id: documentId, ...result } });
 }
 
 async function verifyDocument(documentId: string, req: Request) {
@@ -639,13 +648,13 @@ async function verifyDocument(documentId: string, req: Request) {
   if (currentStatus === "verified" || currentStatus === "partially_verified") updates.last_verified_at = body.last_verified_at || new Date().toISOString();
   const { data, error } = await supabase.from("documents").update(updates).eq("id", documentId).select().single();
   if (error) throw error;
-  return json({ success: true, message: "Verification updated.", document: data });
+  return json({ success: true, message: "Verification updated.", data });
 }
 
 async function rejectDocument(documentId: string) {
   const { data, error } = await supabase.from("documents").update({ status: "rejected", error_log: "Rejected by administrator.", updated_at: new Date().toISOString() }).eq("id", documentId).select().single();
   if (error) throw error;
-  return json({ success: true, message: "Document rejected.", document: data });
+  return json({ success: true, message: "Document rejected.", data });
 }
 
 async function deleteDocument(documentId: string) {
@@ -664,10 +673,19 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   try {
-    const adminKey = req.headers.get("x-admin-key");
-    const expectedKey = Deno.env.get("ADMIN_KEY");
-    if (!expectedKey) return errorResponse("ADMIN_KEY not configured.", 500);
-    if (!adminKey || adminKey !== expectedKey) return errorResponse("Unauthorized.", 403);
+    // Sanitize and trim admin key comparisons
+    const rawAdminKey = req.headers.get("x-admin-key") || "";
+    const rawExpectedKey = Deno.env.get("ADMIN_KEY") || "";
+
+    const adminKey = rawAdminKey.trim().replace(/^["']|["']$/g, "");
+    const expectedKey = rawExpectedKey.trim().replace(/^["']|["']$/g, "");
+
+    if (!expectedKey) {
+      return errorResponse("Server configuration error: ADMIN_KEY is not configured in Supabase Secrets.", 500);
+    }
+    if (!adminKey || adminKey !== expectedKey) {
+      return errorResponse("Unauthorized: Invalid administrator key.", 403);
+    }
 
     const url = new URL(req.url);
     let path = url.pathname.replace(/^.*\/admin\//, "");
