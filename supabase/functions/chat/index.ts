@@ -13,6 +13,7 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 const TRIAL_LIMIT = 10;
 const MAX_FOLLOWUP_QUESTIONS = 9;
+const EMBEDDING_DIM = 384;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
@@ -22,8 +23,8 @@ function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), { status, headers: corsHeaders });
 }
 
-function errorResponse(message: string, status = 500) {
-  return json({ error: message }, status);
+function errorResponse(message: string, status = 500, details?: any) {
+  return json({ error: message, details }, status);
 }
 
 function cleanString(value: unknown, fallback = ""): string {
@@ -34,7 +35,7 @@ function normalizeJurisdiction(value: unknown): string {
   const v = cleanString(value, "nigeria").toLowerCase();
   const map: Record<string, string> = {
     ng: "nigeria", nigeria: "nigeria", "nigerian law": "nigeria",
-    us: "us", usa: "us", "united states": "us",
+    us: "us", usa: "us", "united states": "us", "u.s.": "us",
     uk: "uk", "united kingdom": "uk", global: "global",
   };
   return map[v] || v;
@@ -57,7 +58,7 @@ async function createQueryEmbedding(query: string): Promise<number[]> {
 }
 
 // ============================================================
-// USAGE & SUBSCRIPTION TRACKING
+// USER STATUS & SUBSCRIPTION GATE
 // ============================================================
 
 interface UserStatus {
@@ -85,7 +86,6 @@ async function getUserStatus(userId: string): Promise<UserStatus> {
     return { used: 0, limit: TRIAL_LIMIT, isSubscribed: false, tier: "free" };
   }
 
-  // Check subscription expiry
   let isActive = Boolean(data.is_subscribed);
   if (isActive && data.subscription_expires_at) {
     isActive = new Date(data.subscription_expires_at) > new Date();
@@ -101,10 +101,7 @@ async function getUserStatus(userId: string): Promise<UserStatus> {
 
 async function incrementUsage(userId: string, isSubscribed: boolean): Promise<UserStatus> {
   const current = await getUserStatus(userId);
-
-  // Subscribed users bypass the trial counter
   if (isSubscribed) return current;
-
   if (current.used >= current.limit) return current;
 
   const newCount = current.used + 1;
@@ -117,7 +114,7 @@ async function incrementUsage(userId: string, isSubscribed: boolean): Promise<Us
 }
 
 // ============================================================
-// INQUIRY SESSION TRACKING (9 FOLLOW-UP QUESTIONS)
+// INQUIRY INTERVIEW SESSIONS (ENGINE 1)
 // ============================================================
 
 interface InquirySession {
@@ -142,7 +139,7 @@ async function getActiveInquirySession(conversationId: string): Promise<InquiryS
   return data as InquirySession | null;
 }
 
-async function createInquirySession(userId: string, conversationId: string, originalQuestion: string) {
+async function createInquirySession(userId: string, conversationId: string, originalQuestion: string, jurisdiction: string) {
   const { data } = await supabase
     .from("inquiry_sessions")
     .insert({
@@ -152,6 +149,7 @@ async function createInquirySession(userId: string, conversationId: string, orig
       questions_asked: 0,
       facts_gathered: [],
       final_analysis_delivered: false,
+      jurisdiction,
     })
     .select("*")
     .single();
@@ -172,7 +170,7 @@ async function updateInquirySession(sessionId: string, questionsAsked: number, f
 }
 
 // ============================================================
-// CHAT HISTORY CRUD
+// CHAT HISTORY
 // ============================================================
 
 async function listConversations(userId: string) {
@@ -196,13 +194,8 @@ async function loadConversationHistory(conversationId: string) {
 }
 
 async function saveMessage(conversationId: string, role: string, content: string) {
-  await supabase.from("messages").insert({
-    conversation_id: conversationId, role, content,
-  });
-  await supabase
-    .from("conversations")
-    .update({ updated_at: new Date().toISOString() })
-    .eq("id", conversationId);
+  await supabase.from("messages").insert({ conversation_id: conversationId, role, content });
+  await supabase.from("conversations").update({ updated_at: new Date().toISOString() }).eq("id", conversationId);
 }
 
 async function createConversation(userId: string, title: string, jurisdiction: string) {
@@ -259,7 +252,7 @@ async function transcribeAudio(base64Audio: string, mimeType: string): Promise<s
 }
 
 // ============================================================
-// STATUTORY RETRIEVAL
+// STATUTORY RETRIEVAL & CITATION URL BUILDER
 // ============================================================
 
 interface RetrievedChunk {
@@ -354,7 +347,6 @@ async function retrieveStatutoryContext(query: string, jurisdiction: string): Pr
 
 function detectQueryIntent(query: string, hasActiveSession: boolean): "statutory_lookup" | "advice_needed" | "skip_questions" {
   const lower = query.toLowerCase();
-
   if (hasActiveSession) return "advice_needed";
 
   if (lower.includes("skip questions") || lower.includes("just answer") || 
@@ -375,18 +367,14 @@ function detectQueryIntent(query: string, hasActiveSession: boolean): "statutory
     "liability", "damages", "sentenced", "fired", "dismissed",
     "agreement", "dispute", "owe", "owed", "evicted", "landlord",
     "tenant", "accident", "injured", "injury", "will", "estate",
-    "problem", "issue", "complaint", "complaining", "help me"
+    "problem", "issue", "complaint", "help me", "visa", "green card", "deport"
   ];
 
-  if (adviceKeywords.some(k => lower.includes(k))) {
-    return "advice_needed";
-  }
-
-  return "statutory_lookup";
+  return adviceKeywords.some(k => lower.includes(k)) ? "advice_needed" : "statutory_lookup";
 }
 
 // ============================================================
-// LLM GENERATION
+// LLM INFERENCE ENGINE
 // ============================================================
 
 async function generateAnswer(
@@ -456,162 +444,148 @@ async function generateAnswer(
     }
   }
 
-  throw new Error(`LLM Failed:\n${errors.join("\n")}`);
+  throw new Error(`LLM Generation Failed:\n${errors.join("\n")}`);
 }
 
 // ============================================================
-// PROMPT BUILDERS
+// SYSTEM PROMPTS (ANTI-OUTDATED-LAW & THREE-ENGINE MODEL)
 // ============================================================
+
+const CURRENT_DATE_STRING = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
 
 function buildStatutorySystemPrompt(jurisdiction: string): string {
   return `You are LexAI, an authoritative statutory intelligence assistant for ${jurisdiction.toUpperCase()} law.
 
-RULES:
-1. STRICT GROUNDING: Base answers strictly on the STATUTORY CONTEXT provided.
-2. Use structured bullet points.
-3. Always conclude completely. Never end mid-sentence.
-4. Include every relevant subsection from the context.`;
+CORE TRAINING DIRECTIVES:
+1. MODEL MEMORY IS NOT PROOF OF CURRENT LAW. Rely strictly on the STATUTORY CONTEXT below.
+2. NEVER FABRICATE statutes, section numbers, regulations, court decisions, filing deadlines, or fees.
+3. CITATION PRECISION: Always cite exact Act/Title numbers and sections.
+4. DATE STAMP: When verified primary sources are present, append at the end:
+   *Law checked as of: ${CURRENT_DATE_STRING}*`;
 }
 
 function buildFollowUpSystemPrompt(jurisdiction: string, questionNumber: number, originalQuestion: string): string {
-  return `You are LexAI, a professional legal advisor practicing ${jurisdiction.toUpperCase()} law.
+  return `You are LexAI, an elite legal interview engine practicing ${jurisdiction.toUpperCase()} law.
 
-CRITICAL FACT-GATHERING PROTOCOL:
-You are in the middle of a structured interview with the user. The user's original legal issue is:
-"${originalQuestion}"
+CORE INTERVIEW PHILOSOPHY (Part II of Training Manual):
+- The client provides facts and documents. The AI performs issue spotting, jurisdiction analysis, and legal research.
+- ASK FACTS, NOT LAW: Never ask the client what law applies, what section governs, or what cause of action exists.
+- ASK ONLY MATERIAL QUESTIONS: Each question must directly affect liability, defenses, jurisdiction, limitation periods, or remedies.
+- PROBE VAGUE STATEMENTS: If client mentions threats, discrimination, breach, or damages, ask for specific underlying conduct, dates, and evidence.
 
-This is follow-up question ${questionNumber} of ${MAX_FOLLOWUP_QUESTIONS}. You have ${MAX_FOLLOWUP_QUESTIONS - questionNumber} questions remaining before you must provide final advice.
+INTERVIEW POSTURE:
+The client's original legal issue: "${originalQuestion}"
+This is Question ${questionNumber} of ${MAX_FOLLOWUP_QUESTIONS}. (${MAX_FOLLOWUP_QUESTIONS - questionNumber} questions remaining).
 
 INSTRUCTIONS:
-1. Acknowledge the user's latest answer in 1 brief sentence.
-2. Based on their answer so far, ask ONE focused next question to gather critical missing information.
-3. The question should progressively narrow down into:
-   - Parties involved (names, roles, relationships)
-   - Timeline (dates of key events, duration of issues)
-   - Jurisdiction specifics (state, court, authority involved)
-   - Documents and evidence (contracts, notices, receipts, witnesses)
-   - Prior actions taken (reports, complaints, legal correspondence)
-   - Outcome sought (compensation, injunction, criminal charges, settlement)
-   - Current stage of the matter
-   - Opposing party's position
-   - Any special circumstances (minors, disability, emergencies, deadlines)
+1. Acknowledge the user's latest response in 1 brief, empathetic sentence.
+2. Formulate exactly ONE targeted, neutral factual question to gather missing critical information.
+3. Progressively cover:
+   - Specific conduct (what was said, done, signed, or omitted)
+   - Dates, timeline, and notice received
+   - Physical location / State jurisdiction
+   - Available evidence (contracts, receipts, emails, audio, witnesses)
+   - Adverse facts (what the opposing party will claim)
+   - Practical objective sought by the user
 
-Format your response as:
-
-### Thank You for That Detail
-<Brief 1-sentence acknowledgment>
+FORMAT YOUR RESPONSE:
+### Factual Clarification
+<1-sentence acknowledgment of latest fact>
 
 ### Follow-up Question ${questionNumber} of ${MAX_FOLLOWUP_QUESTIONS}
-<Your single focused question here>
+**<Your single material factual question here>**
 
-**(Why I'm asking):** <Brief 1-sentence reason this fact matters for your legal analysis>
+*(Why this is legally significant):* <1-sentence explanation of why this fact impacts the statutory analysis>
 
 ---
-*You can type "skip questions" at any time to receive a general answer with limited specificity.*
+*Type "skip questions" at any time to receive a preliminary general summary.*
 
-DO NOT provide legal advice yet. Only ask the next question.`;
+DO NOT provide the final legal opinion yet.`;
 }
 
 function buildFinalSubscribedPrompt(jurisdiction: string, factsSummary: string): string {
-  return `You are LexAI, an elite legal advisor practicing ${jurisdiction.toUpperCase()} law.
+  return `You are LexAI, a senior legal counsel specializing in ${jurisdiction.toUpperCase()} law.
 
-You have completed a thorough fact-gathering interview. Now provide a COMPLETE, DETAILED, PROFESSIONAL LEGAL ANALYSIS.
+You have concluded a comprehensive 9-stage fact-gathering interview. Deliver a fully grounded, element-by-element legal opinion.
 
-FACTS GATHERED FROM USER:
+FACTUAL RECORD GATHERED:
 ${factsSummary}
 
-STRUCTURE YOUR FINAL ANALYSIS:
+REQUIRED 10-SECTION OPINION STRUCTURE:
 
-### Executive Summary
-<2-3 sentence overview of the legal position>
+### 1. Your Situation & Factual Matrix
+<Concise distillation of established facts, material timeline, and adverse facts>
 
-### Jurisdiction & Applicable Law
-<State the exact jurisdiction, applicable statute(s), and section numbers from STATUTORY CONTEXT>
+### 2. Precise Legal Issues
+<Specific legal determinations required>
 
-### Detailed Legal Analysis
-<Comprehensive multi-paragraph analysis connecting each fact to the applicable law. Address each legal issue separately. Cite exact section numbers.>
+### 3. Current Controlling Law
+<Verified primary authority from STATUTORY CONTEXT with exact section citations>
 
-### Rights and Obligations of Each Party
-<Clearly outline what each party is legally entitled to and obligated to do>
+### 4. Element-by-Element Application
+<Detailed analysis mapping specific facts to each legal element>
 
-### Procedural Steps Required
-<Step-by-step procedural guidance, including filing deadlines, courts of competent jurisdiction, required documents, and service requirements>
+### 5. Strengths of Your Position
+<Facts and rules supporting the client>
 
-### Likely Outcomes and Risk Assessment
-<Realistic assessment of possible outcomes including best case, worst case, and most likely scenario>
+### 6. Risks, Counterarguments & Adverse Claims
+<Opposing party's defenses, procedural hurdles, and weak points>
 
-### Strategic Recommendations
-<Practical, actionable guidance tailored to the user's specific circumstances>
+### 7. Strategic Options & Remedies
+<Comparison of lawful pathways: negotiation, mediation, litigation, administrative filing>
 
-### Required Documentation
-<List all documents the user needs to prepare or obtain>
+### 8. Critical Deadlines & Procedural Prerequisites
+<Statutory limitation periods, notice requirements, court of competent jurisdiction>
 
-### Deadlines and Time-Sensitive Actions
-<Any statutory deadlines, limitation periods, or urgent actions required>
+### 9. Preliminary Conclusion
+<Calibrated supported conclusion>
 
-### Alternative Options
-<Any out-of-court settlement, mediation, arbitration, or alternative dispute resolution options>
+### 10. Actionable Next Steps & Evidence Preservation
+<Concrete steps the client should take immediately>
 
+---
 ### Verification Status
-<VERIFIED based on cited statutory authorities>
-
-RULES:
-- Base ALL legal reasoning strictly on the STATUTORY CONTEXT and gathered facts.
-- Never fabricate case names, sections, or quotations.
-- Always cite exact section numbers.
-- Finish your analysis completely without cutting off.`;
+**VERIFIED** — Primary statutory sources evaluated.
+*Law checked as of: ${CURRENT_DATE_STRING}*`;
 }
 
 function buildFinalFreeTierPrompt(jurisdiction: string, factsSummary: string): string {
-  return `You are LexAI, a legal advisor practicing ${jurisdiction.toUpperCase()} law.
+  return `You are LexAI, a legal intelligence assistant practicing ${jurisdiction.toUpperCase()} law.
 
-You have completed fact-gathering with a FREE TIER user. Provide a BRIEF SUMMARY ONLY, then prompt them to upgrade for the full detailed analysis.
+You have gathered facts from a FREE TIER user. Provide a concise, high-level summary (under 400 words) and present the upgrade gate for full legal analysis.
 
-FACTS GATHERED FROM USER:
+FACTS GATHERED:
 ${factsSummary}
 
-STRUCTURE YOUR SUMMARY:
+REQUIRED FORMAT:
 
-### Preliminary Summary of Your Legal Position
-<3-4 sentence overview identifying the main legal issue and general position under ${jurisdiction.toUpperCase()} law. Reference the applicable statute by name only.>
+### Summary of Legal Position
+<Brief 3-4 sentence overview of the legal framework under ${jurisdiction.toUpperCase()} law, referencing applicable statutes by name only>
 
 ### Key Legal Issues Identified
-<Short bulleted list of 3-4 key legal issues in the user's situation. One line each.>
+- <Issue 1>
+- <Issue 2>
+- <Issue 3>
 
-### What's Included in Your Full Analysis (Upgrade Required)
-<Brief 1-sentence description of each of these:
-- Detailed statutory analysis with exact section numbers
-- Rights and obligations of each party
-- Step-by-step procedural guidance
-- Deadlines and time-sensitive actions
-- Required documentation
-- Likely outcomes and risk assessment
-- Strategic recommendations tailored to your case
-- Alternative dispute resolution options>
+### 🔒 Complete Legal Analysis Required
+Your matter contains complex factual elements and potential time-sensitive procedural deadlines. To unlock your full 10-section legal opinion, upgrade to **LexAI Counsel**:
 
-### 🔒 Unlock Full Legal Analysis
-Your situation requires detailed legal analysis to protect your interests. Upgrade to **LexAI Premium** to receive:
-- ✓ Complete statutory analysis with citations
-- ✓ Full procedural roadmap and deadlines
-- ✓ Rights, obligations, and strategic recommendations
-- ✓ Unlimited inquiries and document reviews
-- ✓ Priority access to legal verification
+**Included in Full Opinion:**
+- ✓ Exact statutory citations and subsection breakdown
+- ✓ Element-by-element application to your specific facts
+- ✓ Adverse party counter-analysis and risk assessment
+- ✓ Step-by-step procedural roadmap and limitation deadlines
+- ✓ Strategic recommendations and evidence checklist
 
-[**→ Upgrade to Premium**](/contact)
+[**→ Unlock Full Legal Analysis**](/contact)
 
 ---
-
-*LexAI provides legal information, not legal representation. Verify crucial legal steps with qualified counsel.*
-
-RULES:
-- Keep the summary brief (under 400 words total).
-- Mention the applicable statute by name but DO NOT provide specific section numbers or detailed analysis.
-- Make the upgrade value clear without being pushy.
-- Base the summary strictly on the STATUTORY CONTEXT and gathered facts.`;
+*Law checked as of: ${CURRENT_DATE_STRING}*
+*LexAI provides legal information, not formal attorney representation.*`;
 }
 
 // ============================================================
-// MAIN DISPATCHER
+// MAIN HTTP DISPATCHER
 // ============================================================
 
 serve(async (req) => {
@@ -641,7 +615,7 @@ serve(async (req) => {
     }
 
     const body = await req.json().catch(() => null);
-    if (!body) return errorResponse("Invalid request.", 400);
+    if (!body) return errorResponse("Invalid request payload.", 400);
 
     const userMessage = cleanString(body.message);
     const attachment = body.attachment || null;
@@ -649,16 +623,14 @@ serve(async (req) => {
     const jurisdiction = normalizeJurisdiction(body.jurisdiction);
     const history = Array.isArray(body.history) ? body.history : [];
 
-    // Status check
     const userStatus = chatUserId && chatUserId !== "authenticated_user"
       ? await getUserStatus(chatUserId)
       : { used: 0, limit: TRIAL_LIMIT, isSubscribed: false, tier: "free" };
 
-    // Trial limit enforcement (only for non-subscribers)
     if (!userStatus.isSubscribed && userStatus.used >= userStatus.limit) {
       return json({
         paywall: true,
-        error: `You have used all ${TRIAL_LIMIT} free trial messages. Upgrade for unlimited access.`,
+        error: `You have completed all ${TRIAL_LIMIT} free trial messages. Upgrade for unlimited legal analysis.`,
         usage: userStatus,
       });
     }
@@ -679,22 +651,22 @@ serve(async (req) => {
         fullUserText = userMessage + `\n\n--- EXTRACTED DOCUMENT ---\n${attachment.extractedText.substring(0, 8000)}`;
       } else if (attachment.type === "image" && attachment.base64) {
         userContentForLLM = [
-          { type: "text", text: fullUserText || "Analyze this image and describe any legal documents, contracts, or text visible." },
+          { type: "text", text: fullUserText || "Analyze this legal document or photo." },
           { type: "image_url", image_url: { url: `data:${attachment.mimeType};base64,${attachment.base64}` } },
         ];
       }
     }
 
-    // VISION MODE
+    // Vision Analysis
     if (Array.isArray(userContentForLLM)) {
-      const systemPrompt = `You are LexAI, a legal document analysis assistant. Analyze the attached image carefully. If it contains a legal document, contract, or statutory text, identify key clauses, parties, dates, obligations, and potential legal issues. Provide structured analysis.`;
+      const systemPrompt = `You are LexAI Vision. Analyze the attached legal document, contract, or pleading. Identify key clauses, parties, dates, signatures, and risks.`;
       const answer = await generateAnswer(systemPrompt, userContentForLLM, history);
 
       let convId = body.conversation_id;
       if (chatUserId && chatUserId !== "authenticated_user") {
-        if (!convId) convId = await createConversation(chatUserId, "Image Analysis", jurisdiction);
+        if (!convId) convId = await createConversation(chatUserId, "Document Vision Audit", jurisdiction);
         if (convId) {
-          await saveMessage(convId, "user", fullUserText || "[Image attached]");
+          await saveMessage(convId, "user", fullUserText || "[Document/Image Uploaded]");
           await saveMessage(convId, "assistant", answer);
         }
         const updated = await incrementUsage(chatUserId, userStatus.isSubscribed);
@@ -710,13 +682,11 @@ serve(async (req) => {
       });
     }
 
-    // Load or create conversation ID
     let convId = body.conversation_id;
     if (chatUserId && chatUserId !== "authenticated_user" && !convId) {
       convId = await createConversation(chatUserId, fullUserText.substring(0, 60), jurisdiction);
     }
 
-    // Check for active inquiry session
     let activeSession: InquirySession | null = null;
     if (convId) {
       activeSession = await getActiveInquirySession(convId);
@@ -726,7 +696,7 @@ serve(async (req) => {
 
     // Retrieve statutory context
     const chunks = await retrieveStatutoryContext(
-      activeSession?.original_question || fullUserText, 
+      activeSession?.original_question || fullUserText,
       jurisdiction
     );
     const contextPayload = chunks.length > 0
@@ -737,17 +707,17 @@ serve(async (req) => {
     let answer: string;
     let shouldDeliverFinal = false;
 
-    // ========== ADVICE FLOW WITH 9 FOLLOW-UP QUESTIONS ==========
+    // ============================================================
+    // 9-STAGE FACT GATHERING INTERVIEW (ENGINE 1 -> ENGINE 3)
+    // ============================================================
     if (intent === "advice_needed" && convId) {
-      // Create session on first advice query
       if (!activeSession && chatUserId && chatUserId !== "authenticated_user") {
-        activeSession = await createInquirySession(chatUserId, convId, fullUserText);
+        activeSession = await createInquirySession(chatUserId, convId, fullUserText, jurisdiction);
       }
 
       const questionsAsked = activeSession?.questions_asked || 0;
       const factsGathered = activeSession?.facts_gathered || [];
 
-      // Record user's latest answer as a fact
       if (questionsAsked > 0 && activeSession) {
         factsGathered.push({
           question_number: questionsAsked,
@@ -758,59 +728,51 @@ serve(async (req) => {
 
       const nextQuestionNumber = questionsAsked + 1;
 
-      // Check if we've completed all 9 questions -> deliver final analysis
+      // Check if 9 questions completed -> Deliver final advice
       if (questionsAsked >= MAX_FOLLOWUP_QUESTIONS) {
         shouldDeliverFinal = true;
 
         const factsSummary = [
           `Original Issue: ${activeSession?.original_question || fullUserText}`,
-          ...factsGathered.map((f: any, i: number) =>
-            `Fact ${i + 1}: ${f.user_response}`
-          ),
-          `Latest User Input: ${fullUserText}`,
+          ...factsGathered.map((f: any, i: number) => `Fact ${i + 1}: ${f.user_response}`),
+          `Latest Response: ${fullUserText}`,
         ].join("\n\n");
 
-        // Deliver tiered response based on subscription
         if (userStatus.isSubscribed) {
           systemPrompt = buildFinalSubscribedPrompt(jurisdiction, factsSummary);
         } else {
           systemPrompt = buildFinalFreeTierPrompt(jurisdiction, factsSummary);
         }
 
-        userContentForLLM = `STATUTORY CONTEXT:\n${contextPayload}\n\nFACTS GATHERED FROM USER:\n${factsSummary}\n\nUSER'S FINAL INPUT:\n${fullUserText}`;
-
+        userContentForLLM = `STATUTORY CONTEXT:\n${contextPayload}\n\nRECORD OF GATHERED FACTS:\n${factsSummary}\n\nFINAL RESPONSE:\n${fullUserText}`;
         answer = await generateAnswer(systemPrompt, userContentForLLM, history);
 
-        // Mark session as delivered
         if (activeSession) {
           await updateInquirySession(activeSession.id, questionsAsked, factsGathered, true);
         }
       } else {
-        // Ask the next follow-up question
+        // Ask Next Progressive Follow-Up Question
         systemPrompt = buildFollowUpSystemPrompt(
-          jurisdiction, 
-          nextQuestionNumber, 
+          jurisdiction,
+          nextQuestionNumber,
           activeSession?.original_question || fullUserText
         );
 
         userContentForLLM = `STATUTORY CONTEXT:\n${contextPayload}\n\nFACTS GATHERED SO FAR:\n${JSON.stringify(factsGathered, null, 2)}\n\nUSER'S LATEST MESSAGE:\n${fullUserText}`;
-
         answer = await generateAnswer(systemPrompt, userContentForLLM, history);
 
-        // Update session with new question count
         if (activeSession) {
           await updateInquirySession(activeSession.id, nextQuestionNumber, factsGathered, false);
         }
       }
-    }
-    // ========== STATUTORY LOOKUP OR SKIP MODE ==========
-    else {
+    } else {
+      // Direct Statutory Lookup
       systemPrompt = buildStatutorySystemPrompt(jurisdiction);
-      userContentForLLM = `STATUTORY CONTEXT:\n${contextPayload}\n\nUSER MESSAGE:\n${fullUserText}`;
+      userContentForLLM = `STATUTORY CONTEXT:\n${contextPayload}\n\nUSER INQUIRY:\n${fullUserText}`;
       answer = await generateAnswer(systemPrompt, userContentForLLM, history);
     }
 
-    // Save messages
+    // Persist messages & increment usage
     if (chatUserId && chatUserId !== "authenticated_user" && convId) {
       await saveMessage(convId, "user", fullUserText);
       await saveMessage(convId, "assistant", answer);
